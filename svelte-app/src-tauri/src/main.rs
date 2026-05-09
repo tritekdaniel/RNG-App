@@ -120,6 +120,8 @@ impl Clone for AppStateWrapper {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             app.manage(AppStateWrapper(Mutex::new(AppState::new())));
             Ok(())
@@ -134,7 +136,8 @@ fn main() {
             batch_generate,
             set_output_mode,
             remove_output,
-            clear_outputs
+            clear_outputs,
+            send_notification
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -203,4 +206,10 @@ fn set_output_mode(state: tauri::State<AppStateWrapper>, mode: String) -> AppSta
     let mut locked = state.0.lock().unwrap();
     locked.set_output_mode(mode);
     locked.clone()
+}
+
+#[tauri::command]
+fn send_notification(app: tauri::AppHandle, title: String, body: String) {
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app.notification().builder().title(&title).body(&body).show();
 }

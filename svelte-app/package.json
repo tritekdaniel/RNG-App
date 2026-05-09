@@ -1,21 +1,22 @@
 {
-    "name":  "rng-app",
-    "version":  "1.0.0",
-    "private":  true,
-    "type":  "module",
-    "scripts":  {
-                    "tauri":  "tauri",
-                    "dev":  "vite",
-                    "build":  "vite build"
-                },
-    "dependencies":  {
-                          "svelte":  "^5",
-                          "@tauri-apps/api":  "^2"
-                      },
-    "devDependencies":  {
-                            "vite":  "^5.4.11",
-                            "@sveltejs/vite-plugin-svelte":  "^4.0.0",
-                            "@tauri-apps/cli":  "^2"
-                        }
+    "name": "rng-app",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "tauri": "tauri",
+        "dev": "vite",
+        "build": "vite build"
+    },
+    "dependencies": {
+        "@tauri-apps/api": "^2",
+        "@tauri-apps/plugin-global-shortcut": "^2.3.1",
+        "@tauri-apps/plugin-notification": "^2.3.3",
+        "svelte": "^5"
+    },
+    "devDependencies": {
+        "@sveltejs/vite-plugin-svelte": "^4.0.0",
+        "@tauri-apps/cli": "^2",
+        "vite": "^5.4.11"
+    }
 }
-
