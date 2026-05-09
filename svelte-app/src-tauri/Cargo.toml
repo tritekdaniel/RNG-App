@@ -1,0 +1,19 @@
+[package]
+name = "rng-app"
+version = "1.0.0"
+description = "Random value generator"
+authors = [""]
+license = ""
+rust-version = "1.70"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rand = "0.8"
+lazy_static = "1"

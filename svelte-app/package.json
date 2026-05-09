@@ -1,0 +1,21 @@
+{
+    "name":  "rng-app",
+    "version":  "1.0.0",
+    "private":  true,
+    "type":  "module",
+    "scripts":  {
+                    "tauri":  "tauri",
+                    "dev":  "vite",
+                    "build":  "vite build"
+                },
+    "dependencies":  {
+                          "svelte":  "^5",
+                          "@tauri-apps/api":  "^2"
+                      },
+    "devDependencies":  {
+                            "vite":  "^5.4.11",
+                            "@sveltejs/vite-plugin-svelte":  "^4.0.0",
+                            "@tauri-apps/cli":  "^2"
+                        }
+}
+
