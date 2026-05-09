@@ -7,10 +7,6 @@
   import { emit } from '@tauri-apps/api/event';
   import { listen } from '@tauri-apps/api/event';
 
-  function focus(node) {
-    node.focus();
-  }
-
   let inputs = $state([]);
   let outputs = $state([]);
   let latestOutput = $state(null);
@@ -33,7 +29,7 @@
   // --- New settings ---
   let particlesEnabled = $state(localStorage.getItem('rng-particles') !== 'false');
   let volume = $state(parseFloat(localStorage.getItem('rng-volume') ?? '1'));
-  let shortcutKeys = $state(JSON.parse(localStorage.getItem('rng-shortcut') || 'null') || { alt: true, shift: true, ctrl: false, key: 'r' });
+  let shortcutKeys = $state(JSON.parse(localStorage.getItem('rng-shortcut') || 'null') || { alt: true, shift: true, ctrl: false, key: 'r', code: 'KeyR' });
   let recordingShortcut = $state(false);
   let notifyOnShortcut = $state(localStorage.getItem('rng-notify-shortcut') === 'true');
   let shortcutDisplay = $derived(
@@ -204,7 +200,10 @@
   });
 
   function matchesShortcut(e) {
-    return e.code === `Key${shortcutKeys.key.toUpperCase()}` &&
+    const codeMatch = shortcutKeys.code
+      ? e.code === shortcutKeys.code
+      : e.code === `Key${shortcutKeys.key.toUpperCase()}`;
+    return codeMatch &&
       !!e.altKey === !!shortcutKeys.alt &&
       !!e.shiftKey === !!shortcutKeys.shift &&
       !!e.ctrlKey === !!shortcutKeys.ctrl;
@@ -229,30 +228,22 @@
   function setupDocumentShortcut() {
     if (shortcutHandler) document.removeEventListener('keydown', shortcutHandler);
     shortcutHandler = (e) => {
-      console.log('Document keydown:', e.key, e.code, 'ctrl:', e.ctrlKey, 'alt:', e.altKey, 'shift:', e.shiftKey);
-      console.log('Expected key:', shortcutKeys.key, 'ctrl:', shortcutKeys.ctrl, 'alt:', shortcutKeys.alt, 'shift:', shortcutKeys.shift);
       if (matchesShortcut(e) && !recordingShortcut) {
-        console.log('Shortcut matched!');
         e.preventDefault();
         e.stopPropagation();
         handleGenerate();
       }
     };
     document.addEventListener('keydown', shortcutHandler, true);
-    console.log('Document shortcut fallback registered');
   }
 
   async function registerGlobalShortcut() {
     const shortcutStr = getShortcutString();
-    console.log('Registering global shortcut:', shortcutStr);
     try {
-      const alreadyRegistered = await isRegistered(shortcutStr);
-      console.log('Already registered:', alreadyRegistered);
-      if (alreadyRegistered) {
-        await unregister(shortcutStr);
-      }
+      await unregister(shortcutStr);
+    } catch {}
+    try {
       await register(shortcutStr, async (event) => {
-        console.log('Shortcut pressed:', event.state);
         if (event.state === 'Pressed' && !recordingShortcut) {
           await handleGenerate();
           if (notifyOnShortcut) {
@@ -260,12 +251,9 @@
           }
         }
       });
-      console.log('Global shortcut registered successfully');
     } catch (e) {
-      console.warn('Global shortcut failed, using fallback:', e);
+      console.warn('Global shortcut registration failed:', e);
     }
-    // Always set up document shortcut as reliable fallback
-    setupDocumentShortcut();
   }
 
   onMount(async () => {
@@ -321,11 +309,9 @@
       }
     }, 100);
 
-    // Setup document shortcut immediately (primary method)
+    // Setup shortcut (global + document fallback)
+    await registerGlobalShortcut();
     setupDocumentShortcut();
-
-    // Also try to register global shortcut for when app is minimized
-    await registerGlobalShortcut().catch(() => {});
 
     deleteHandler = (e) => {
       if (e.key !== 'Delete') return;
@@ -549,16 +535,33 @@
   }
 
   // --- Shortcut recording ---
-  function startRecordingShortcut() { recordingShortcut = true; }
+  let captureListener = null;
 
-  async function onShortcutKeydown(e) {
-    if (!recordingShortcut) return;
-    e.preventDefault(); e.stopPropagation();
-    if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
-    shortcutKeys = { ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, key: e.key.toLowerCase() };
-    localStorage.setItem('rng-shortcut', JSON.stringify(shortcutKeys));
-    recordingShortcut = false;
-    await registerGlobalShortcut();
+  function startRecordingShortcut() {
+    recordingShortcut = true;
+    if (captureListener) {
+      document.removeEventListener('keydown', captureListener, true);
+      captureListener = null;
+    }
+    captureListener = (e) => {
+      if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      shortcutKeys = {
+        ctrl: e.ctrlKey,
+        alt: e.altKey,
+        shift: e.shiftKey,
+        key: e.key.toLowerCase(),
+        code: e.code,
+      };
+      localStorage.setItem('rng-shortcut', JSON.stringify(shortcutKeys));
+      recordingShortcut = false;
+      document.removeEventListener('keydown', captureListener, true);
+      captureListener = null;
+      setupDocumentShortcut();
+      registerGlobalShortcut().catch(console.warn);
+    };
+    document.addEventListener('keydown', captureListener, true);
   }
 
   // --- Docking ---
@@ -652,11 +655,11 @@
 <!-- Shortcut recording overlay -->
 {#if recordingShortcut}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="shortcut-overlay" onkeydown={onShortcutKeydown} tabindex="-1" use:focus>
+  <div class="shortcut-overlay" onclick={() => recordingShortcut = false}>
     <div class="shortcut-dialog">
       <p>Press your new shortcut combination…</p>
       <small style="color: var(--text-secondary)">e.g. Ctrl+Shift+G, Alt+R</small>
-      <button onclick={() => recordingShortcut = false}>Cancel</button>
+      <button onclick={() => { recordingShortcut = false; if (captureListener) { document.removeEventListener('keydown', captureListener, true); captureListener = null; } }}>Cancel</button>
     </div>
   </div>
 {/if}
