@@ -10,6 +10,7 @@ A desktop application for generating random values from a user-defined list of i
 - Track used outputs to avoid duplicates
 - Toggle between single and batch output modes
 - Remove individual outputs or clear all at once
+- Do batch input with items seperated by pipes- item|item|item, the app will handle it for you
 - Cross-platform desktop app (Windows/macOS/Linux)
 
 ## Tech Stack

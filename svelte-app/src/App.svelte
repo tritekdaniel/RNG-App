@@ -58,8 +58,8 @@
     document.documentElement.style.setProperty('--accent-glow-medium', `rgba(${_r}, ${_g}, ${_b}, 0.15)`);
   }
 
-  let svCanvasRef = null;
-  let svWrapRef = null;
+  let svCanvasRef = $state(null);
+  let svWrapRef = $state(null);
 
   const _initHsv = (function () {
     const r = parseInt(tempColor.slice(1,3), 16) / 255;
@@ -198,7 +198,8 @@
 
   $effect(() => {
     const _h = hueVal;
-    if (colorPickerOpen && svCanvasRef) drawSV();
+    const _ref = svCanvasRef;
+    if (colorPickerOpen && _ref) drawSV();
     return () => {};
   });
 
@@ -275,6 +276,14 @@
       await refreshState();
     });
 
+    // Listen for accent color changes from other windows
+    unlistenAccent = await listen('accent-updated', (event) => {
+      const color = event.payload.color;
+      tempColor = color;
+      document.documentElement.style.setProperty('--accent', color);
+      updateAccentColors(color);
+    });
+
     // Listen for dock commands from standalone windows (only needed in main window)
     if (!panelMode) {
       unlistenDock = await listen('dock-panel', async (event) => {
@@ -329,6 +338,22 @@
   });
 
   $effect(() => {
+    const ref = outputCanvasRef;
+    const _docked = outputDocked;
+    if (!ref || !ref.parentElement) return;
+    const t = setTimeout(() => {
+      if (!ref.parentElement) return;
+      const rect = ref.parentElement.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        ref.width = rect.width;
+        ref.height = rect.height;
+        outputParticleSystem = new ParticleSystem(ref);
+      }
+    }, 50);
+    return () => clearTimeout(t);
+  });
+
+  $effect(() => {
     const _len = outputs.length;
     const _enabled = particlesEnabled;
     if (!_enabled || outputs.length === 0 || !particleSystem) return;
@@ -366,6 +391,7 @@
     if (resizeObserver) resizeObserver.disconnect();
     if (unlistenState) unlistenState();
     if (unlistenDock) unlistenDock();
+    if (unlistenAccent) unlistenAccent();
     try { await unregister(getShortcutString()); } catch {}
     if (shortcutHandler) document.removeEventListener('keydown', shortcutHandler);
     if (deleteHandler) document.removeEventListener('keydown', deleteHandler);
@@ -397,9 +423,19 @@
     playAudio(new URL('./assets/bew.aac', import.meta.url).href);
     updateAccentColors(tempColor);
     document.documentElement.style.setProperty('--accent', tempColor);
-    if (particlesEnabled && outputParticleSystem && outputCanvasRef) {
-      outputParticleSystem.risingUpward(150, tempColor);
-      outputParticleSystem.startAnimation();
+    if (particlesEnabled && outputCanvasRef) {
+      if (!outputParticleSystem || !outputCanvasRef.parentElement) {
+        const rect = outputCanvasRef.parentElement?.getBoundingClientRect();
+        if (rect?.width > 0) {
+          outputCanvasRef.width = rect.width;
+          outputCanvasRef.height = rect.height;
+          outputParticleSystem = new ParticleSystem(outputCanvasRef);
+        }
+      }
+      if (outputParticleSystem) {
+        outputParticleSystem.risingUpward(150, tempColor);
+        outputParticleSystem.startAnimation();
+      }
     }
     const latestField = document.querySelector('.latest-output-field');
     if (latestField) { latestField.classList.add('pulse'); setTimeout(() => latestField.classList.remove('pulse'), 600); }
@@ -419,6 +455,7 @@
     const indices = [...inputSelections].sort((a, b) => b - a);
     for (const i of indices) await rpc('remove_input', { index: i });
     inputSelections = []; await refreshState();
+    emit('state-updated');
   }
 
   function toggleOutputSelect(value) {
@@ -430,6 +467,7 @@
     if (outputSelections.length === 0) return;
     for (const v of outputSelections) await rpc('remove_output', { value: v });
     outputSelections = []; await refreshState();
+    emit('state-updated');
   }
 
   function handleItemSelect(e, type) {
@@ -458,6 +496,7 @@
     localStorage.setItem('rng-accent-color', color);
     document.documentElement.style.setProperty('--accent', color);
     updateAccentColors(color);
+    emit('accent-updated', { color });
   }
 
   function startEditing(index, value) { editingInputIndex = index; editValue = value; }
@@ -466,6 +505,7 @@
     if (editingInputIndex === -1 || !editValue.trim()) return;
     await rpc('update_input', { index: editingInputIndex, value: editValue.trim() });
     editingInputIndex = -1; editValue = ''; await refreshState();
+    emit('state-updated');
   }
 
   function cancelEdit() { editingInputIndex = -1; editValue = ''; }
@@ -488,9 +528,19 @@
     playAudio(new URL('./assets/bip-bop-02.aac', import.meta.url).href);
     updateAccentColors(tempColor);
     document.documentElement.style.setProperty('--accent', tempColor);
-    if (particlesEnabled && outputParticleSystem && outputCanvasRef) {
-      outputParticleSystem.risingUpward(150, tempColor);
-      outputParticleSystem.startAnimation();
+    if (particlesEnabled && outputCanvasRef) {
+      if (!outputParticleSystem || !outputCanvasRef.parentElement) {
+        const rect = outputCanvasRef.parentElement?.getBoundingClientRect();
+        if (rect?.width > 0) {
+          outputCanvasRef.width = rect.width;
+          outputCanvasRef.height = rect.height;
+          outputParticleSystem = new ParticleSystem(outputCanvasRef);
+        }
+      }
+      if (outputParticleSystem) {
+        outputParticleSystem.risingUpward(150, tempColor);
+        outputParticleSystem.startAnimation();
+      }
     }
     await refreshState();
     emit('state-updated');
@@ -516,6 +566,7 @@
   let outputWindow = null;
   let unlistenState = null;
   let unlistenDock = null;
+  let unlistenAccent = null;
 
   async function toggleInputDock() {
     if (inputDocked) {
