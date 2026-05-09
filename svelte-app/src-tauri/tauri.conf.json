@@ -1,5 +1,5 @@
 {
-  "identifier": "com.rng.app",
+  "identifier": "com.rng.desktop",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
