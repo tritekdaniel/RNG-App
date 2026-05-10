@@ -14,6 +14,7 @@
   import undockIcon from './assets/Undock.svg?raw';
   import addIcon from './assets/Add.svg?raw';
   import removeIcon from './assets/Remove.svg?raw';
+  import unselectIcon from './assets/Unselect.svg?raw';
   import colorIcon from './assets/Color.svg?raw';
   import settingsIcon from './assets/Settings.svg?raw';
   import volumeMuteIcon from './assets/Volume-mute.svg?raw';
@@ -54,6 +55,8 @@
   import saveSoundMp3 from './assets/Save.mp3?url';
   import loadSound from './assets/Load.m4a?url';
   import loadSoundMp3 from './assets/Load.mp3?url';
+  import volumeChangeSound from './assets/VolumeChange.m4a?url';
+  import volumeChangeSoundMp3 from './assets/VolumeChange.mp3?url';
 
   const soundMap = {
     [addSound]: addSoundMp3,
@@ -73,6 +76,7 @@
     [editItemSound]: editItemSoundMp3,
     [saveSound]: saveSoundMp3,
     [loadSound]: loadSoundMp3,
+    [volumeChangeSound]: volumeChangeSoundMp3,
   };
 
   let inputs = $state([]);
@@ -171,6 +175,9 @@
   let resizeObserver = null;
   let shortcutHandler = null;
   let deleteHandler = null;
+  let visibilityChangeHandler = null;
+  let lastGenerateTime = 0;
+  let generating = false;
   let svDragging = false;
   let hueDragging = false;
 
@@ -321,21 +328,6 @@
       !!e.ctrlKey === !!shortcutKeys.ctrl;
   }
 
-  function makeShortcutHandler() {
-    return (e) => {
-      if (recordingShortcut) return;
-      if (matchesShortcut(e)) {
-        e.preventDefault();
-        if (showCompletionModal) {
-          handleClearOutputs();
-          showCompletionModal = false;
-        } else {
-          handleGenerate();
-        }
-      }
-    };
-  }
-
   function getShortcutString() {
     const parts = [];
     if (shortcutKeys.ctrl) parts.push('CommandOrControl');
@@ -348,7 +340,7 @@
     return parts.join('+');
   }
 
-  function setupDocumentShortcut() {
+function setupDocumentShortcut() {
     if (shortcutHandler) document.removeEventListener('keydown', shortcutHandler);
     shortcutHandler = (e) => {
       if (matchesShortcut(e) && !recordingShortcut) {
@@ -456,11 +448,12 @@
     setupDocumentShortcut();
 
     // Re-register global shortcut on visibility change (fixes issues after minimize)
-    document.addEventListener('visibilitychange', () => {
+    visibilityChangeHandler = () => {
       if (!document.hidden) {
         setTimeout(() => registerGlobalShortcut().catch(console.warn), 100);
       }
-    });
+    };
+    document.addEventListener('visibilitychange', visibilityChangeHandler);
 
     deleteHandler = (e) => {
       if (e.key !== 'Delete') return;
@@ -523,13 +516,16 @@
   });
 
   onDestroy(async () => {
+    generating = false;
     if (resizeObserver) resizeObserver.disconnect();
     if (unlistenState) unlistenState();
     if (unlistenDock) unlistenDock();
     if (unlistenAccent) unlistenAccent();
-    try { await unregister(getShortcutString()); } catch {}
+    await unregisterAllShortcuts();
     if (shortcutHandler) document.removeEventListener('keydown', shortcutHandler);
     if (deleteHandler) document.removeEventListener('keydown', deleteHandler);
+    if (visibilityChangeHandler) document.removeEventListener('visibilitychange', visibilityChangeHandler);
+    if (audioCtx) { audioCtx.close(); audioCtx = null; }
   });
 
   async function handleAddInput(value) {
@@ -586,12 +582,15 @@
   }
 
   async function handleGenerate() {
-    if (inputs.length === 0) return;
-    if (outputMode === 'batch') { await handleBatchGenerate(); return; }
+    if (generating) return;
+    generating = true;
+    if (inputs.length === 0) { generating = false; return; }
+    if (outputMode === 'batch') { await handleBatchGenerate(); generating = false; return; }
     const result = await rpc('generate');
     if (!result) {
       showCompletionModal = true;
       playSound(outOfInputsSound);
+      generating = false;
       return;
     }
     latestOutput = result;
@@ -622,6 +621,7 @@
     emit('state-updated');
     const centerPanel = document.querySelector('.center-panel');
     if (centerPanel) { centerPanel.classList.remove('animate-border'); void centerPanel.offsetWidth; centerPanel.classList.add('animate-border'); }
+    generating = false;
   }
 
   function toggleInputSelect(index) {
@@ -643,6 +643,14 @@
     else { outputSelections = [...outputSelections, value]; playSound(selectedItemSound); }
   }
 
+  function unselectAllInputs() {
+    if (inputSelections.length > 0) { inputSelections = []; playSound(unselectedItemSound); }
+  }
+
+  function unselectAllOutputs() {
+    if (outputSelections.length > 0) { outputSelections = []; playSound(unselectedItemSound); }
+  }
+
   async function handleBatchRemoveOutputs() {
     if (outputSelections.length === 0) return;
     for (const v of outputSelections) await rpc('remove_output', { value: v });
@@ -658,9 +666,11 @@
       if (e.shiftKey && lastInputSelectionIndex >= 0) {
         const start = Math.min(lastInputSelectionIndex, index);
         const end = Math.max(lastInputSelectionIndex, index);
+        let added = false;
         for (let i = start; i <= end; i++) {
-          if (!inputSelections.includes(i)) { inputSelections = [...inputSelections, i]; playSound(selectedItemSound); }
+          if (!inputSelections.includes(i)) { inputSelections = [...inputSelections, i]; added = true; }
         }
+        if (added) playSound(selectedItemSound);
       } else {
         toggleInputSelect(index);
       }
@@ -668,17 +678,18 @@
     } else {
       const value = e.currentTarget.dataset.value;
       if (e.shiftKey && lastOutputSelectionIndex >= 0) {
-        const outputsList = outputs.map(o => o.value);
-        const start = Math.min(lastOutputSelectionIndex, outputsList.indexOf(value));
-        const end = Math.max(lastOutputSelectionIndex, outputsList.indexOf(value));
+        const start = Math.min(lastOutputSelectionIndex, outputs.indexOf(value));
+        const end = Math.max(lastOutputSelectionIndex, outputs.indexOf(value));
+        let added = false;
         for (let i = start; i <= end; i++) {
-          const v = outputsList[i];
-          if (!outputSelections.includes(v)) { outputSelections = [...outputSelections, v]; playSound(selectedItemSound); }
+          const v = outputs[i];
+          if (!outputSelections.includes(v)) { outputSelections = [...outputSelections, v]; added = true; }
         }
+        if (added) playSound(selectedItemSound);
       } else {
         toggleOutputSelect(value);
       }
-      lastOutputSelectionIndex = outputsList.indexOf(value);
+      lastOutputSelectionIndex = outputs.indexOf(value);
     }
   }
 
@@ -726,11 +737,12 @@
   }
 
   async function handleBatchGenerate() {
-    if (inputs.length === 0) return;
+    if (inputs.length === 0) { generating = false; return; }
     const [results] = await rpc('batch_generate');
     if (!results || results.length === 0) {
       showCompletionModal = true;
       playSound(outOfInputsSound);
+      generating = false;
       return;
     }
     latestOutput = null;
@@ -759,13 +771,13 @@
     emit('state-updated');
     const centerPanel = document.querySelector('.center-panel');
     if (centerPanel) { centerPanel.classList.remove('animate-border'); void centerPanel.offsetWidth; centerPanel.classList.add('animate-border'); }
+    generating = false;
   }
 
   // --- Shortcut recording ---
   let captureListener = null;
 
   async function startRecordingShortcut() {
-    console.log('startRecordingShortcut called');
     if (registeredShortcut) {
       try { await unregister(registeredShortcut); } catch {}
       await new Promise(r => setTimeout(r, 50));
@@ -776,13 +788,11 @@
       captureListener = null;
     }
     captureListener = (e) => {
-      console.log('captureListener triggered', e.key, 'recordingShortcut:', recordingShortcut);
       if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
       const validCode = e.code.startsWith('Key') || e.code.startsWith('Digit') || /^F\d+$/.test(e.code) || e.code === 'Space';
       if (!validCode) return;
       e.preventDefault();
       e.stopPropagation();
-      console.log('setting shortcut keys');
       shortcutKeys = {
         ctrl: e.ctrlKey,
         alt: e.altKey,
@@ -895,11 +905,11 @@
 <!-- Shortcut recording overlay -->
 {#if recordingShortcut}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="shortcut-overlay" onclick={() => recordingShortcut = false}>
+  <div class="shortcut-overlay" onclick={() => { recordingShortcut = false; generating = false; if (captureListener) { document.removeEventListener('keydown', captureListener, true); captureListener = null; } }}>
     <div class="shortcut-dialog">
       <p>Press your new shortcut combination…</p>
       <small style="color: var(--text-secondary)">e.g. Ctrl+Shift+G, Alt+R</small>
-      <button onclick={() => { recordingShortcut = false; if (captureListener) { document.removeEventListener('keydown', captureListener, true); captureListener = null; } }}>Cancel</button>
+      <button onclick={() => { recordingShortcut = false; generating = false; if (captureListener) { document.removeEventListener('keydown', captureListener, true); captureListener = null; } }}>Cancel</button>
     </div>
   </div>
 {/if}
@@ -923,10 +933,13 @@
 <div class="sidebar-actions">
         {#if inputSelections.length > 0}
           <button class="icon-btn icon-remove" onclick={handleBatchRemoveInputs} title="Delete selected ({inputSelections.length})">{@html removeIcon}</button>
+          <button class="icon-btn icon-unselect" onclick={unselectAllInputs} title="Unselect all">{@html unselectIcon}</button>
         {:else}
   <button class="icon-btn icon-clear" onclick={() => handleClearInputs()} title="Clear all">{@html clearIcon}</button>
         {/if}
+        {#if inputSelections.length === 0}
         <button class="icon-btn icon-add" onclick={async () => { const el = document.getElementById('inputFieldStandalone'); if (el?.value.trim()) { await handleAddInput(el.value); el.value = ''; } else el?.focus(); }} title="Add">{@html addIcon}</button>
+        {/if}
   <button class="icon-btn icon-dock" onclick={async () => { try { new Audio(dockSound).play(); } catch {} emit('dock-panel', { panel: 'inputs' }); }} title="Dock">{@html dockIcon}</button>
       </div>
     </div>
@@ -964,6 +977,7 @@
       <div class="sidebar-actions">
         {#if outputSelections.length > 0}
           <button class="icon-btn icon-remove" onclick={handleBatchRemoveOutputs} title="Delete selected ({outputSelections.length})">{@html removeIcon}</button>
+          <button class="icon-btn icon-unselect" onclick={unselectAllOutputs} title="Unselect all">{@html unselectIcon}</button>
         {:else}
           <button class="icon-btn icon-clear" onclick={() => handleClearOutputs()} title="Clear all">{@html clearIcon}</button>
         {/if}
@@ -999,10 +1013,13 @@
 <div class="sidebar-actions">
           {#if inputSelections.length > 0}
             <button class="icon-btn icon-remove" onclick={handleBatchRemoveInputs} title="Delete selected ({inputSelections.length})">{@html removeIcon}</button>
+            <button class="icon-btn icon-unselect" onclick={unselectAllInputs} title="Unselect all">{@html unselectIcon}</button>
           {:else}
   <button class="icon-btn icon-clear" onclick={() => handleClearInputs()} title="Clear all">{@html clearIcon}</button>
           {/if}
+          {#if inputSelections.length === 0}
           <button class="icon-btn icon-add" onclick={async () => { const el = document.getElementById('inputField'); if (el?.value.trim()) { await handleAddInput(el.value); el.value = ''; } else el?.focus(); }} title="Add">{@html addIcon}</button>
+          {/if}
           <button class="icon-btn icon-save" onclick={saveInputsList} title="Save inputs">{@html saveIcon}</button>
           <button class="icon-btn icon-load" onclick={loadInputsList} title="Load inputs">{@html importIcon}</button>
   <button class="icon-btn icon-undock" onclick={toggleInputDock} title="Undock">{@html undockIcon}</button>
@@ -1086,7 +1103,7 @@
         <div class="volume-row">
           <span class="vol-icon" style="color: var(--accent);">{@html (volume === 0 ? volumeMuteIcon : volume < 0.5 ? volumeLowIcon : volumeHighIcon)}</span>
           <input type="range" min="0" max="1" step="0.05" bind:value={volume}
-            oninput={() => { localStorage.setItem('rng-volume', String(volume)); playSound(buttonGenericSound); }} class="volume-slider" />
+            oninput={() => { localStorage.setItem('rng-volume', String(volume)); playSound(volumeChangeSound); }} class="volume-slider" />
           <span class="vol-label">{Math.round(volume * 100)}%</span>
         </div>
 
@@ -1143,6 +1160,7 @@
         <div class="sidebar-actions">
           {#if outputSelections.length > 0}
 <button class="icon-btn icon-remove" onclick={handleBatchRemoveOutputs} title="Delete selected ({outputSelections.length})">{@html removeIcon}</button>
+            <button class="icon-btn icon-unselect" onclick={unselectAllOutputs} title="Unselect all">{@html unselectIcon}</button>
           {:else}
             <button class="icon-btn icon-clear" onclick={() => handleClearOutputs()} title="Clear all">{@html clearIcon}</button>
           {/if}
@@ -1342,6 +1360,7 @@
   :global(.icon-dock:hover svg) { animation: shrink-subtle 0.3s ease-in-out; }
   :global(.icon-add:hover svg) { animation: tilt-right 0.4s ease-in-out; }
   :global(.icon-remove:hover svg) { animation: jiggle 0.3s ease-in-out; }
+  :global(.icon-unselect:hover svg) { animation: jiggle 0.3s ease-in-out; }
   :global(.icon-dock-panel:hover svg) { animation: shrink-subtle 0.3s ease-in-out; }
 
   :global(.dock-btn svg) { color: currentColor; }
@@ -1381,6 +1400,7 @@
     font-size: 13px;
     display: flex;
     align-items: center;
+    user-select: none;
   }
 
   :global(.checkmark) {
