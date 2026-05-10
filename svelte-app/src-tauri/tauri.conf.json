@@ -4,8 +4,7 @@
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
-    "iconPath": "icons/icon.icns"
+    "beforeBuildCommand": "npm run build"
   },
   "app": {
     "windows": [
