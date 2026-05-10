@@ -9,6 +9,7 @@ A desktop application for generating random values from a user-defined list of i
 - Generate batch outputs (shuffles remaining items)
 - Track used outputs to avoid duplicates
 - Toggle between single and batch output modes
+- Save and load input lists as json files
 - Remove individual outputs or clear all at once
 - Batch input with items seperated by pipes- item|item|item, the app will handle it for you
 - Cross-platform desktop app (Windows/macOS/Linux)

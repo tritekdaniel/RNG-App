@@ -32,6 +32,11 @@
   import outOfInputsSound from './assets/OutOfInputs.m4a?url';
   import buttonGenericSound from './assets/ButtonGeneric.m4a?url';
   import notificationSound from './assets/Notification.m4a?url';
+  import selectedItemSound from './assets/SelectedItem.m4a?url';
+  import unselectedItemSound from './assets/UnSelectedItem.m4a?url';
+  import editItemSound from './assets/EditItem.m4a?url';
+  import saveSound from './assets/Save.m4a?url';
+  import loadSound from './assets/Load.m4a?url';
 
   let inputs = $state([]);
   let outputs = $state([]);
@@ -474,6 +479,7 @@
     if (path) {
       const { writeTextFile } = await import('@tauri-apps/plugin-fs');
       await writeTextFile(path, JSON.stringify(inputs, null, 2));
+      playSound(saveSound);
     }
   }
 
@@ -494,6 +500,7 @@
           }
           await refreshState();
           emit('state-updated');
+          playSound(loadSound);
         }
       } catch (err) {
         console.error('Failed to load inputs:', err);
@@ -541,8 +548,8 @@
   }
 
   function toggleInputSelect(index) {
-    if (inputSelections.includes(index)) inputSelections = inputSelections.filter(i => i !== index);
-    else inputSelections = [...inputSelections, index];
+    if (inputSelections.includes(index)) { inputSelections = inputSelections.filter(i => i !== index); playSound(unselectedItemSound); }
+    else { inputSelections = [...inputSelections, index]; playSound(selectedItemSound); }
   }
 
   async function handleBatchRemoveInputs() {
@@ -555,8 +562,8 @@
   }
 
   function toggleOutputSelect(value) {
-    if (outputSelections.includes(value)) outputSelections = outputSelections.filter(v => v !== value);
-    else outputSelections = [...outputSelections, value];
+    if (outputSelections.includes(value)) { outputSelections = outputSelections.filter(v => v !== value); playSound(unselectedItemSound); }
+    else { outputSelections = [...outputSelections, value]; playSound(selectedItemSound); }
   }
 
   async function handleBatchRemoveOutputs() {
@@ -597,13 +604,14 @@
     emit('accent-updated', { color });
   }
 
-  function startEditing(index, value) { editingInputIndex = index; editValue = value; }
+  function startEditing(index, value) { editingInputIndex = index; editValue = value; playSound(editItemSound); }
 
   async function saveEdit() {
     if (editingInputIndex === -1 || !editValue.trim()) return;
     await rpc('update_input', { index: editingInputIndex, value: editValue.trim() });
     editingInputIndex = -1; editValue = ''; await refreshState();
     emit('state-updated');
+    playSound(addSound);
   }
 
   function cancelEdit() { editingInputIndex = -1; editValue = ''; }
@@ -797,7 +805,7 @@
     <h2>All items generated!</h2>
     <p style="color: var(--text-secondary); margin-bottom: 16px;">The list is empty. Clear outputs to restart?</p>
     <div class="modal-actions">
-      <button class="btn-secondary" onclick={() => showCompletionModal = false}>Cancel</button>
+      <button class="btn-secondary" onclick={() => { showCompletionModal = false; playSound(buttonGenericSound); }}>Cancel</button>
       <button class="btn-primary" onclick={handleClearOutputs}>Clear & Restart</button>
     </div>
   </div>
@@ -824,6 +832,7 @@
           <div class="list-item edit-mode" onclick={(e) => e.stopPropagation()}>
             <input type="text" class="edit-input" bind:value={editValue} autofocus
               onkeydown={(e) => { if (e.key === 'Enter') { saveEdit(); e.preventDefault(); } else if (e.key === 'Escape') { cancelEdit(); e.preventDefault(); } }} />
+            <button class="edit-cancel" onclick={() => { cancelEdit(); playSound(buttonGenericSound); }}>✕</button>
           </div>
         {:else}
           <div class="list-item" class:selected={inputSelections.includes(i)} data-index={i}
@@ -901,6 +910,7 @@
             <div class="list-item edit-mode" onclick={(e) => e.stopPropagation()}>
               <input type="text" class="edit-input" bind:value={editValue} autofocus
                 onkeydown={(e) => { if (e.key === 'Enter') { saveEdit(); e.preventDefault(); } else if (e.key === 'Escape') { cancelEdit(); e.preventDefault(); } }} />
+              <button class="edit-cancel" onclick={() => { cancelEdit(); playSound(buttonGenericSound); }}>✕</button>
             </div>
           {:else}
             <div class="list-item" class:selected={inputSelections.includes(i)} data-index={i}
@@ -926,7 +936,7 @@
   {/if}
 
   <!-- Center Panel -->
-  <div class="center-panel" onclick={(e) => { if (!e.target.closest('.settings-btn') && !e.target.closest('.settings-panel')) showSettingsMenu = false; }}>
+  <div class="center-panel" onclick={(e) => { if (!e.target.closest('.settings-btn') && !e.target.closest('.settings-panel')) { if (showSettingsMenu) playSound(settingsCloseSound); showSettingsMenu = false; } }}>
     <button class="settings-btn icon-settings" onclick={(e) => { e.stopPropagation(); if (showSettingsMenu) { showSettingsMenu = false; playSound(settingsCloseSound); } else { showSettingsMenu = true; playSound(settingsOpenSound); } }} title="Settings">{@html settingsIcon}</button>
 
     {#if showSettingsMenu}
@@ -940,7 +950,7 @@
 
         <h3 style="margin-top:14px">Accent Color</h3>
         {#if !colorPickerOpen}
-          <button class="color-wheel-btn" onclick={() => colorPickerOpen = true}>{@html colorIcon} Pick Color</button>
+          <button class="color-wheel-btn" onclick={() => { colorPickerOpen = true; playSound(buttonGenericSound); }}>{@html colorIcon} Pick Color</button>
         {:else}
           <div class="cp-wrap">
             <div class="cp-canvas-wrap" bind:this={svWrapRef} onpointerdown={(e) => startSVDrag(e)}>
@@ -955,7 +965,7 @@
               <div class="cp-swatch" style="background: {tempColor};"></div>
               <input class="cp-hex" bind:value={tempColor} oninput={(e) => { if (/^#[0-9A-Fa-f]{6}$/.test(e.currentTarget.value)) updateAccentColor(e.currentTarget.value); }} />
             </div>
-            <button class="cp-close-btn" onclick={() => colorPickerOpen = false}>Close</button>
+            <button class="cp-close-btn" onclick={() => { colorPickerOpen = false; playSound(buttonGenericSound); }}>Close</button>
           </div>
         {/if}
 
@@ -972,14 +982,14 @@
         <div class="volume-row">
           <span class="vol-icon" style="color: var(--accent);">{@html (volume === 0 ? volumeMuteIcon : volume < 0.5 ? volumeLowIcon : volumeHighIcon)}</span>
           <input type="range" min="0" max="1" step="0.05" bind:value={volume}
-            oninput={() => localStorage.setItem('rng-volume', String(volume))} class="volume-slider" />
+            oninput={() => { localStorage.setItem('rng-volume', String(volume)); playSound(buttonGenericSound); }} class="volume-slider" />
           <span class="vol-label">{Math.round(volume * 100)}%</span>
         </div>
 
         <h3 style="margin-top:14px">Keyboard Shortcut</h3>
         <div class="shortcut-row">
           <span class="shortcut-badge">{shortcutDisplay}</span>
-          <button class="icon-btn" onclick={startRecordingShortcut} title="Change shortcut">Edit</button>
+          <button class="icon-btn" onclick={() => { playSound(buttonGenericSound); startRecordingShortcut(); }} title="Change shortcut">Edit</button>
         </div>
 
         <div class="toggle-row">
@@ -1481,6 +1491,12 @@
     border: 1px solid var(--border-color); border-radius: 6px;
     padding: 7px; font-size: 13px; width: 100%; box-sizing: border-box; outline: none;
   }
+
+  .edit-cancel {
+    background: transparent; border: none; color: var(--text-secondary); cursor: pointer;
+    font-size: 14px; padding: 0 6px; opacity: 0.7;
+  }
+  .edit-cancel:hover { opacity: 1; color: var(--accent); }
 
   :global(.latest-output-field) {
     width: 100%; min-height: 48px; padding: 12px 16px;
