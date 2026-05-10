@@ -54,6 +54,8 @@
   let outputMode = $state(localStorage.getItem('rng-output-mode') || 'single');
   let outputSelections = $state([]);
   let inputSelections = $state([]);
+  let lastInputSelectionIndex = $state(-1);
+  let lastOutputSelectionIndex = $state(-1);
   let showSettingsMenu = $state(false);
   let colorPickerOpen = $state(false);
 
@@ -267,7 +269,10 @@
     if (shortcutKeys.ctrl) parts.push('CommandOrControl');
     if (shortcutKeys.alt) parts.push('Alt');
     if (shortcutKeys.shift) parts.push('Shift');
-    parts.push('Key' + shortcutKeys.key.toUpperCase());
+    const keyPart = shortcutKeys.code && shortcutKeys.code.startsWith('Key') 
+      ? 'Key' + shortcutKeys.key.toUpperCase()
+      : shortcutKeys.code || 'Key' + shortcutKeys.key.toUpperCase();
+    parts.push(keyPart);
     return parts.join('+');
   }
 
@@ -576,8 +581,33 @@
 
   function handleItemSelect(e, type) {
     if (e.target.classList.contains('checkmark')) return;
-    if (type === 'input') toggleInputSelect(parseInt(e.currentTarget.dataset.index));
-    else toggleOutputSelect(e.currentTarget.dataset.value);
+    if (type === 'input') {
+      const index = parseInt(e.currentTarget.dataset.index);
+      if (e.shiftKey && lastInputSelectionIndex >= 0) {
+        const start = Math.min(lastInputSelectionIndex, index);
+        const end = Math.max(lastInputSelectionIndex, index);
+        for (let i = start; i <= end; i++) {
+          if (!inputSelections.includes(i)) { inputSelections = [...inputSelections, i]; playSound(selectedItemSound); }
+        }
+      } else {
+        toggleInputSelect(index);
+      }
+      lastInputSelectionIndex = index;
+    } else {
+      const value = e.currentTarget.dataset.value;
+      if (e.shiftKey && lastOutputSelectionIndex >= 0) {
+        const outputsList = outputs.map(o => o.value);
+        const start = Math.min(lastOutputSelectionIndex, outputsList.indexOf(value));
+        const end = Math.max(lastOutputSelectionIndex, outputsList.indexOf(value));
+        for (let i = start; i <= end; i++) {
+          const v = outputsList[i];
+          if (!outputSelections.includes(v)) { outputSelections = [...outputSelections, v]; playSound(selectedItemSound); }
+        }
+      } else {
+        toggleOutputSelect(value);
+      }
+      lastOutputSelectionIndex = outputsList.indexOf(value);
+    }
   }
 
   async function handleClearOutputs() {
@@ -676,6 +706,8 @@
     captureListener = (e) => {
       console.log('captureListener triggered', e.key, 'recordingShortcut:', recordingShortcut);
       if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
+      const validCode = e.code.startsWith('Key') || e.code.startsWith('Digit') || /^F\d+$/.test(e.code) || e.code === 'Space';
+      if (!validCode) return;
       e.preventDefault();
       e.stopPropagation();
       console.log('setting shortcut keys');

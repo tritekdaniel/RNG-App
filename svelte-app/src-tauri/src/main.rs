@@ -118,7 +118,7 @@ impl Clone for AppStateWrapper {
 }
 
 fn main() {
-    tauri::Builder::default()
+    let result = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
@@ -141,8 +141,12 @@ fn main() {
             clear_outputs,
             send_notification
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .run(tauri::generate_context!());
+
+    if let Err(e) = result {
+        eprintln!("Error while running tauri application: {}", e);
+        std::process::exit(1);
+    }
 }
 
 #[tauri::command]

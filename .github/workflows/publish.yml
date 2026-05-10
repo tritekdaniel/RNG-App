@@ -51,6 +51,9 @@ jobs:
       - name: fix binary permissions
         run: cd svelte-app && chmod +x node_modules/.bin/*
 
+      - name: build frontend
+        run: cd svelte-app && npm run build
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
