@@ -12,7 +12,6 @@ svelte-app/src-tauri/bin/
 svelte-app/src-tauri/build/
 svelte-app/src-tauri/.taurignore
 svelte-app/src-tauri/icons/*.icns
-svelte-app/src-tauri/icons/icon.png
 
 # OS files
 .DS_Store
