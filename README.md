@@ -13,6 +13,22 @@ A desktop application for generating random values from a user-defined list of i
 - Remove individual outputs or clear all at once
 - Batch input with items seperated by pipes- item|item|item, the app will handle it for you
 - Cross-platform desktop app (Windows/macOS/Linux)
+- Docked panel mode for multi-window workflows
+- Customizable accent color with color picker
+- Global keyboard shortcut for quick access
+- UI sounds and hover animations
+
+## Screenshots
+
+![Main Interface](examples/Screenshot%202026-05-10%20024915.png)
+
+![Input Management](examples/Screenshot%202026-05-10%20025000.png)
+
+![Output Tracking](examples/Screenshot%202026-05-10%20025058.png)
+
+![Settings](examples/Screenshot%202026-05-10%20025149.png)
+
+![Docked Panel Mode](examples/Screenshot%202026-05-10%20025347.png)
 
 ## Tech Stack
 
