@@ -7,6 +7,32 @@
   import { emit } from '@tauri-apps/api/event';
   import { listen } from '@tauri-apps/api/event';
 
+  import clearIcon from './assets/Clear.svg?raw';
+  import saveIcon from './assets/Save.svg?raw';
+  import importIcon from './assets/Import.svg?raw';
+  import dockIcon from './assets/Dock.svg?raw';
+  import undockIcon from './assets/Undock.svg?raw';
+  import addIcon from './assets/Add.svg?raw';
+  import removeIcon from './assets/Remove.svg?raw';
+  import colorIcon from './assets/Color.svg?raw';
+  import settingsIcon from './assets/Settings.svg?raw';
+  import volumeMuteIcon from './assets/Volume-mute.svg?raw';
+  import volumeLowIcon from './assets/Volume-low.svg?raw';
+  import volumeHighIcon from './assets/Volume-high.svg?raw';
+
+  import addSound from './assets/Add.m4a?url';
+  import removeSound from './assets/Remove.m4a?url';
+  import clearSound from './assets/Clear.m4a?url';
+  import dockSound from './assets/Dock.m4a?url';
+  import undockSound from './assets/Undock.m4a?url';
+  import settingsOpenSound from './assets/SettingsOpen.m4a?url';
+  import settingsCloseSound from './assets/SettingsClose.m4a?url';
+  import singleOutputSound from './assets/SingleOutput.m4a?url';
+  import batchOutputSound from './assets/BatchOutput.m4a?url';
+  import outOfInputsSound from './assets/OutOfInputs.m4a?url';
+  import buttonGenericSound from './assets/ButtonGeneric.m4a?url';
+  import notificationSound from './assets/Notification.m4a?url';
+
   let inputs = $state([]);
   let outputs = $state([]);
   let latestOutput = $state(null);
@@ -29,7 +55,7 @@
   // --- New settings ---
   let particlesEnabled = $state(localStorage.getItem('rng-particles') !== 'false');
   let volume = $state(parseFloat(localStorage.getItem('rng-volume') ?? '1'));
-  let shortcutKeys = $state(JSON.parse(localStorage.getItem('rng-shortcut') || 'null') || { alt: true, shift: true, ctrl: false, key: 'r', code: 'KeyR' });
+  let shortcutKeys = $state(JSON.parse(localStorage.getItem('rng-shortcut') || 'null') || { alt: false, shift: true, ctrl: true, key: 'g', code: 'KeyG' });
   let recordingShortcut = $state(false);
   let notifyOnShortcut = $state(localStorage.getItem('rng-notify-shortcut') === 'true');
   let shortcutDisplay = $derived(
@@ -42,17 +68,20 @@
   let inputPos = $state(JSON.parse(localStorage.getItem('rng-input-pos') || 'null') || { x: 20, y: 60 });
   let outputPos = $state(JSON.parse(localStorage.getItem('rng-output-pos') || 'null') || { x: null, y: 60 });
 
-  // Apply accent color synchronously before first render to avoid flash
-  {
-    const _c = tempColor;
-    const _r = parseInt(_c.slice(1,3), 16);
-    const _g = parseInt(_c.slice(3,5), 16);
-    const _b = parseInt(_c.slice(5,7), 16);
-    document.documentElement.style.setProperty('--accent', _c);
-    document.documentElement.style.setProperty('--accent-glow', `rgba(${_r}, ${_g}, ${_b}, 0.3)`);
-    document.documentElement.style.setProperty('--accent-bg-hover', `rgba(${_r}, ${_g}, ${_b}, 0.1)`);
-    document.documentElement.style.setProperty('--accent-glow-medium', `rgba(${_r}, ${_g}, ${_b}, 0.15)`);
+  function setAccentColor(color) {
+    const r = parseInt(color.slice(1,3), 16);
+    const g = parseInt(color.slice(3,5), 16);
+    const b = parseInt(color.slice(5,7), 16);
+    document.documentElement.style.setProperty('--accent', color);
+    document.documentElement.style.setProperty('--accent-glow', `rgba(${r}, ${g}, ${b}, 0.3)`);
+    document.documentElement.style.setProperty('--accent-bg-hover', `rgba(${r}, ${g}, ${b}, 0.1)`);
+    document.documentElement.style.setProperty('--accent-glow-medium', `rgba(${r}, ${g}, ${b}, 0.15)`);
+    const rN = r/255, gN = g/255, bN = b/255;
+    document.documentElement.style.setProperty('--icon-filter', `matrix(${0.213 + 0.787*(1-rN)} ${0.715 - 0.715*rN} ${0.072 - 0.072*rN} 0 0 ${0.213 - 0.213*gN} ${0.715 + 0.285*(1-gN)} ${0.072 - 0.072*gN} 0 0 ${0.213 - 0.213*bN} ${0.715 - 0.715*bN} ${0.072 + 0.928*(1-bN)} 0 0 0 0 0 1 0)`);
   }
+
+  // Apply accent color synchronously before first render to avoid flash
+  setAccentColor(tempColor);
 
   let svCanvasRef = $state(null);
   let svWrapRef = $state(null);
@@ -102,7 +131,11 @@
   let hueDragging = false;
 
   function playAudio(url) {
-    try { const a = new Audio(url); a.volume = volume; a.play(); } catch (e) {}
+    try { const a = new Audio(url); a.volume = volume ?? 1; a.play(); } catch (e) {}
+  }
+
+  function playSound(soundUrl) {
+    if (soundUrl) playAudio(soundUrl);
   }
 
   function drawSV() {
@@ -212,7 +245,15 @@
   function makeShortcutHandler() {
     return (e) => {
       if (recordingShortcut) return;
-      if (matchesShortcut(e)) { e.preventDefault(); handleGenerate(); }
+      if (matchesShortcut(e)) {
+        e.preventDefault();
+        if (showCompletionModal) {
+          handleClearOutputs();
+          showCompletionModal = false;
+        } else {
+          handleGenerate();
+        }
+      }
     };
   }
 
@@ -231,26 +272,43 @@
       if (matchesShortcut(e) && !recordingShortcut) {
         e.preventDefault();
         e.stopPropagation();
-        handleGenerate();
+        if (showCompletionModal) {
+          handleClearOutputs();
+          showCompletionModal = false;
+        } else {
+          handleGenerate();
+        }
       }
     };
     document.addEventListener('keydown', shortcutHandler, true);
   }
 
+  let registeredShortcut = null;
+
   async function registerGlobalShortcut() {
     const shortcutStr = getShortcutString();
+    const oldShortcut = registeredShortcut;
+    if (oldShortcut && oldShortcut !== shortcutStr) {
+      try { await unregister(oldShortcut); } catch (e) { console.warn('unregister failed:', e); }
+      await new Promise(r => setTimeout(r, 100));
+    }
     try {
-      await unregister(shortcutStr);
-    } catch {}
-    try {
+      await unregister(shortcutStr).catch(() => {});
+      await new Promise(r => setTimeout(r, 50));
       await register(shortcutStr, async (event) => {
         if (event.state === 'Pressed' && !recordingShortcut) {
-          await handleGenerate();
-          if (notifyOnShortcut) {
-            await invoke('send_notification', { title: 'RNG', body: `Generated: ${latestOutput || '(none)'}` });
+          if (showCompletionModal) {
+            await handleClearOutputs();
+            showCompletionModal = false;
+          } else {
+            await handleGenerate();
+            if (notifyOnShortcut && !document.hasFocus()) {
+              await invoke('send_notification', { title: 'RNG', body: `Generated: ${latestOutput || '(none)'}` });
+            }
           }
         }
       });
+      registeredShortcut = shortcutStr;
     } catch (e) {
       console.warn('Global shortcut registration failed:', e);
     }
@@ -268,7 +326,7 @@
     unlistenAccent = await listen('accent-updated', (event) => {
       const color = event.payload.color;
       tempColor = color;
-      document.documentElement.style.setProperty('--accent', color);
+      setAccentColor(color);
       updateAccentColors(color);
     });
 
@@ -281,11 +339,13 @@
           inputWindow = null;
           inputDocked = true;
           localStorage.setItem('rng-input-docked', 'true');
+          playSound(dockSound);
         } else if (panel === 'outputs' && outputWindow) {
           try { await outputWindow.close(); } catch {}
           outputWindow = null;
           outputDocked = true;
           localStorage.setItem('rng-output-docked', 'true');
+          playSound(dockSound);
         }
       });
     }
@@ -312,6 +372,13 @@
     // Setup shortcut (global + document fallback)
     await registerGlobalShortcut();
     setupDocumentShortcut();
+
+    // Re-register global shortcut on visibility change (fixes issues after minimize)
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        setTimeout(() => registerGlobalShortcut().catch(console.warn), 100);
+      }
+    });
 
     deleteHandler = (e) => {
       if (e.key !== 'Delete') return;
@@ -389,11 +456,49 @@
     for (const part of parts) await rpc('add_input', { value: part });
     await refreshState();
     emit('state-updated');
+    playSound(addSound);
   }
 
   async function handleClearInputs() {
     await rpc('clear_inputs'); inputSelections = []; await refreshState();
+    playSound(clearSound);
     emit('state-updated');
+  }
+
+  async function saveInputsList() {
+    const { save } = await import('@tauri-apps/plugin-dialog');
+    const path = await save({
+      defaultPath: 'rng-inputs.json',
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    });
+    if (path) {
+      const { writeTextFile } = await import('@tauri-apps/plugin-fs');
+      await writeTextFile(path, JSON.stringify(inputs, null, 2));
+    }
+  }
+
+  async function loadInputsList() {
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const { readTextFile } = await import('@tauri-apps/plugin-fs');
+    const path = await open({
+      multiple: false,
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    });
+    if (path) {
+      try {
+        const text = await readTextFile(path);
+        const loaded = JSON.parse(text);
+        if (Array.isArray(loaded)) {
+          for (const item of loaded) {
+            await rpc('add_input', { value: String(item) });
+          }
+          await refreshState();
+          emit('state-updated');
+        }
+      } catch (err) {
+        console.error('Failed to load inputs:', err);
+      }
+    }
   }
 
   async function handleGenerate() {
@@ -402,13 +507,17 @@
     const result = await rpc('generate');
     if (!result) {
       showCompletionModal = true;
-      playAudio(new URL('./assets/yup-03.aac', import.meta.url).href);
+      playSound(outOfInputsSound);
       return;
     }
     latestOutput = result;
-    playAudio(new URL('./assets/bew.aac', import.meta.url).href);
+    if (notifyOnShortcut && !document.hasFocus()) {
+      playSound(notificationSound);
+    } else {
+      playSound(singleOutputSound);
+    }
     updateAccentColors(tempColor);
-    document.documentElement.style.setProperty('--accent', tempColor);
+    setAccentColor(tempColor);
     if (particlesEnabled && outputCanvasRef) {
       if (!outputParticleSystem || !outputCanvasRef.parentElement) {
         const rect = outputCanvasRef.parentElement?.getBoundingClientRect();
@@ -442,6 +551,7 @@
     for (const i of indices) await rpc('remove_input', { index: i });
     inputSelections = []; await refreshState();
     emit('state-updated');
+    playSound(removeSound);
   }
 
   function toggleOutputSelect(value) {
@@ -454,6 +564,7 @@
     for (const v of outputSelections) await rpc('remove_output', { value: v });
     outputSelections = []; await refreshState();
     emit('state-updated');
+    playSound(removeSound);
   }
 
   function handleItemSelect(e, type) {
@@ -466,6 +577,7 @@
     showCompletionModal = false;
     await rpc('clear_outputs'); latestOutput = null; outputSelections = []; await refreshState();
     emit('state-updated');
+    playSound(clearSound);
   }
 
   function updateAccentColors(color) {
@@ -480,7 +592,7 @@
   function updateAccentColor(color) {
     tempColor = color;
     localStorage.setItem('rng-accent-color', color);
-    document.documentElement.style.setProperty('--accent', color);
+    setAccentColor(color);
     updateAccentColors(color);
     emit('accent-updated', { color });
   }
@@ -500,6 +612,7 @@
     outputMode = mode;
     localStorage.setItem('rng-output-mode', mode);
     await rpc('set_output_mode', { mode });
+    playSound(buttonGenericSound);
   }
 
   async function handleBatchGenerate() {
@@ -507,13 +620,17 @@
     const [results] = await rpc('batch_generate');
     if (!results || results.length === 0) {
       showCompletionModal = true;
-      playAudio(new URL('./assets/yup-03.aac', import.meta.url).href);
+      playSound(outOfInputsSound);
       return;
     }
     latestOutput = null;
-    playAudio(new URL('./assets/bip-bop-02.aac', import.meta.url).href);
+    if (notifyOnShortcut && !document.hasFocus()) {
+      playSound(notificationSound);
+    } else {
+      playSound(batchOutputSound);
+    }
     updateAccentColors(tempColor);
-    document.documentElement.style.setProperty('--accent', tempColor);
+    setAccentColor(tempColor);
     if (particlesEnabled && outputCanvasRef) {
       if (!outputParticleSystem || !outputCanvasRef.parentElement) {
         const rect = outputCanvasRef.parentElement?.getBoundingClientRect();
@@ -537,16 +654,23 @@
   // --- Shortcut recording ---
   let captureListener = null;
 
-  function startRecordingShortcut() {
+  async function startRecordingShortcut() {
+    console.log('startRecordingShortcut called');
+    if (registeredShortcut) {
+      try { await unregister(registeredShortcut); } catch {}
+      await new Promise(r => setTimeout(r, 50));
+    }
     recordingShortcut = true;
     if (captureListener) {
       document.removeEventListener('keydown', captureListener, true);
       captureListener = null;
     }
     captureListener = (e) => {
+      console.log('captureListener triggered', e.key, 'recordingShortcut:', recordingShortcut);
       if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
       e.preventDefault();
       e.stopPropagation();
+      console.log('setting shortcut keys');
       shortcutKeys = {
         ctrl: e.ctrlKey,
         alt: e.altKey,
@@ -588,9 +712,11 @@
         });
         inputWindow.once('tauri://destroyed', () => { inputWindow = null; inputDocked = true; });
         inputDocked = false;
+        playSound(undockSound);
       } catch (e) { console.error('Failed to create input window:', e); }
     } else {
       // Currently undocked - switch to docked (inline)
+      playSound(dockSound);
       if (inputWindow) {
         try { await inputWindow.close(); } catch {}
         inputWindow = null;
@@ -617,9 +743,11 @@
         });
         outputWindow.once('tauri://destroyed', () => { outputWindow = null; outputDocked = true; });
         outputDocked = false;
+        playSound(undockSound);
       } catch (e) { console.error('Failed to create output window:', e); }
     } else {
       // Currently undocked - switch to docked (inline)
+      playSound(dockSound);
       if (outputWindow) {
         try { await outputWindow.close(); } catch {}
         outputWindow = null;
@@ -680,14 +808,14 @@
   <div class="standalone-panel">
     <div class="sidebar-header">
       <span class="sidebar-title">Inputs</span>
-      <div class="sidebar-actions">
+<div class="sidebar-actions">
         {#if inputSelections.length > 0}
-          <button class="icon-btn" onclick={handleBatchRemoveInputs} title="Delete selected ({inputSelections.length})">×</button>
+          <button class="icon-btn icon-remove" onclick={handleBatchRemoveInputs} title="Delete selected ({inputSelections.length})">{@html removeIcon}</button>
         {:else}
-          <button class="icon-btn" onclick={() => handleClearInputs()} title="Clear all">🗑️</button>
+  <button class="icon-btn icon-clear" onclick={() => handleClearInputs()} title="Clear all">{@html clearIcon}</button>
         {/if}
-<button class="icon-btn" onclick={async () => { await emit('dock-panel', { panel: 'inputs' }); }} title="Dock">📌</button>
-        <button class="icon-btn" onclick={async () => { const el = document.getElementById('inputFieldStandalone'); if (el?.value.trim()) { await handleAddInput(el.value); el.value = ''; } else el?.focus(); }} title="Add">+</button>
+        <button class="icon-btn icon-add" onclick={async () => { const el = document.getElementById('inputFieldStandalone'); if (el?.value.trim()) { await handleAddInput(el.value); el.value = ''; } else el?.focus(); }} title="Add">{@html addIcon}</button>
+  <button class="icon-btn icon-dock" onclick={async () => { try { new Audio(dockSound).play(); } catch {} emit('dock-panel', { panel: 'inputs' }); }} title="Dock">{@html dockIcon}</button>
       </div>
     </div>
     <div class="input-list">
@@ -722,11 +850,11 @@
       <span class="sidebar-title">Outputs</span>
       <div class="sidebar-actions">
         {#if outputSelections.length > 0}
-          <button class="icon-btn" onclick={handleBatchRemoveOutputs} title="Delete selected ({outputSelections.length})">×</button>
+          <button class="icon-btn icon-remove" onclick={handleBatchRemoveOutputs} title="Delete selected ({outputSelections.length})">{@html removeIcon}</button>
         {:else}
-          <button class="icon-btn" onclick={() => handleClearOutputs()} title="Clear all">🗑️</button>
+          <button class="icon-btn icon-clear" onclick={() => handleClearOutputs()} title="Clear all">{@html clearIcon}</button>
         {/if}
-        <button class="icon-btn" onclick={async () => { await emit('dock-panel', { panel: 'outputs' }); }} title="Dock">📌</button>
+        <button class="icon-btn icon-dock" onclick={async () => { try { new Audio(dockSound).play(); } catch {} emit('dock-panel', { panel: 'outputs' }); }} title="Dock">{@html dockIcon}</button>
       </div>
     </div>
     <div class="output-list">
@@ -755,14 +883,16 @@
     <div class="sidebar">
       <div class="sidebar-header">
         <span class="sidebar-title">Inputs</span>
-        <div class="sidebar-actions">
+<div class="sidebar-actions">
           {#if inputSelections.length > 0}
-            <button class="icon-btn" onclick={handleBatchRemoveInputs} title="Delete selected ({inputSelections.length})">×</button>
+            <button class="icon-btn icon-remove" onclick={handleBatchRemoveInputs} title="Delete selected ({inputSelections.length})">{@html removeIcon}</button>
           {:else}
-            <button class="icon-btn" onclick={() => handleClearInputs()} title="Clear all">🗑️</button>
+  <button class="icon-btn icon-clear" onclick={() => handleClearInputs()} title="Clear all">{@html clearIcon}</button>
           {/if}
-<button class="icon-btn" onclick={toggleInputDock} title="Undock">⊞</button>
-          <button class="icon-btn" onclick={async () => { const el = document.getElementById('inputField'); if (el?.value.trim()) { await handleAddInput(el.value); el.value = ''; } else el?.focus(); }} title="Add">+</button>
+          <button class="icon-btn icon-add" onclick={async () => { const el = document.getElementById('inputField'); if (el?.value.trim()) { await handleAddInput(el.value); el.value = ''; } else el?.focus(); }} title="Add">{@html addIcon}</button>
+          <button class="icon-btn icon-save" onclick={saveInputsList} title="Save inputs">{@html saveIcon}</button>
+          <button class="icon-btn icon-load" onclick={loadInputsList} title="Load inputs">{@html importIcon}</button>
+  <button class="icon-btn icon-undock" onclick={toggleInputDock} title="Undock">{@html undockIcon}</button>
         </div>
       </div>
       <div class="input-list">
@@ -796,8 +926,8 @@
   {/if}
 
   <!-- Center Panel -->
-  <div class="center-panel" onclick={(e) => { if (!e.target.closest('.hamburger-btn') && !e.target.closest('.settings-panel')) showSettingsMenu = false; }}>
-    <button class="hamburger-btn" onclick={(e) => { e.stopPropagation(); showSettingsMenu = !showSettingsMenu; }} title="Settings">&#x2630;</button>
+  <div class="center-panel" onclick={(e) => { if (!e.target.closest('.settings-btn') && !e.target.closest('.settings-panel')) showSettingsMenu = false; }}>
+    <button class="settings-btn icon-settings" onclick={(e) => { e.stopPropagation(); if (showSettingsMenu) { showSettingsMenu = false; playSound(settingsCloseSound); } else { showSettingsMenu = true; playSound(settingsOpenSound); } }} title="Settings">{@html settingsIcon}</button>
 
     {#if showSettingsMenu}
       <div class="settings-panel">
@@ -810,7 +940,7 @@
 
         <h3 style="margin-top:14px">Accent Color</h3>
         {#if !colorPickerOpen}
-          <button class="color-wheel-btn" onclick={() => colorPickerOpen = true}>🎨 Pick Color</button>
+          <button class="color-wheel-btn" onclick={() => colorPickerOpen = true}>{@html colorIcon} Pick Color</button>
         {:else}
           <div class="cp-wrap">
             <div class="cp-canvas-wrap" bind:this={svWrapRef} onpointerdown={(e) => startSVDrag(e)}>
@@ -833,14 +963,14 @@
         <label class="toggle-row">
           <span>Particle effects</span>
           <button class="toggle-btn" class:on={particlesEnabled}
-            onclick={() => { particlesEnabled = !particlesEnabled; localStorage.setItem('rng-particles', String(particlesEnabled)); }}>
+            onclick={() => { particlesEnabled = !particlesEnabled; localStorage.setItem('rng-particles', String(particlesEnabled)); playSound(buttonGenericSound); }}>
             {particlesEnabled ? 'On' : 'Off'}
           </button>
         </label>
 
         <h3 style="margin-top:14px">Volume</h3>
         <div class="volume-row">
-          <span class="vol-icon">{volume === 0 ? '🔇' : volume < 0.5 ? '🔉' : '🔊'}</span>
+          <span class="vol-icon" style="color: var(--accent);">{@html (volume === 0 ? volumeMuteIcon : volume < 0.5 ? volumeLowIcon : volumeHighIcon)}</span>
           <input type="range" min="0" max="1" step="0.05" bind:value={volume}
             oninput={() => localStorage.setItem('rng-volume', String(volume))} class="volume-slider" />
           <span class="vol-label">{Math.round(volume * 100)}%</span>
@@ -849,24 +979,26 @@
         <h3 style="margin-top:14px">Keyboard Shortcut</h3>
         <div class="shortcut-row">
           <span class="shortcut-badge">{shortcutDisplay}</span>
-          <button class="icon-btn" onclick={startRecordingShortcut} title="Change shortcut">✏️</button>
+          <button class="icon-btn" onclick={startRecordingShortcut} title="Change shortcut">Edit</button>
         </div>
 
         <div class="toggle-row">
           <span>Notify on shortcut</span>
           <button class="toggle-btn" class:on={notifyOnShortcut}
-            onclick={() => { notifyOnShortcut = !notifyOnShortcut; localStorage.setItem('rng-notify-shortcut', String(notifyOnShortcut)); }}>
+            onclick={() => { notifyOnShortcut = !notifyOnShortcut; localStorage.setItem('rng-notify-shortcut', String(notifyOnShortcut)); playSound(buttonGenericSound); }}>
             {notifyOnShortcut ? 'On' : 'Off'}
           </button>
         </div>
 
         <h3 style="margin-top:14px">Panels</h3>
         <div class="dock-row">
-          <button class="dock-btn" class:active={inputDocked} onclick={toggleInputDock}>
-            {inputDocked ? '📌 Inputs — docked' : '🔓 Inputs — floating'}
+          <button class="dock-btn icon-dock-panel" class:active={inputDocked} onclick={toggleInputDock}>
+            {#if inputDocked}{@html undockIcon}{:else}{@html dockIcon}{/if}
+            <span>Inputs — {inputDocked ? 'docked' : 'floating'}</span>
           </button>
-          <button class="dock-btn" class:active={outputDocked} onclick={toggleOutputDock}>
-            {outputDocked ? '📌 Outputs — docked' : '🔓 Outputs — floating'}
+          <button class="dock-btn icon-dock-panel" class:active={outputDocked} onclick={toggleOutputDock}>
+            {#if outputDocked}{@html undockIcon}{:else}{@html dockIcon}{/if}
+            <span>Outputs — {outputDocked ? 'docked' : 'floating'}</span>
           </button>
         </div>
 
@@ -896,11 +1028,11 @@
         <span class="sidebar-title">Outputs</span>
         <div class="sidebar-actions">
           {#if outputSelections.length > 0}
-            <button class="icon-btn" onclick={handleBatchRemoveOutputs} title="Delete selected ({outputSelections.length})">×</button>
+<button class="icon-btn icon-remove" onclick={handleBatchRemoveOutputs} title="Delete selected ({outputSelections.length})">{@html removeIcon}</button>
           {:else}
-            <button class="icon-btn" onclick={() => handleClearOutputs()} title="Clear all">🗑️</button>
+            <button class="icon-btn icon-clear" onclick={() => handleClearOutputs()} title="Clear all">{@html clearIcon}</button>
           {/if}
-<button class="icon-btn" onclick={toggleOutputDock} title="Undock">⊞</button>
+  <button class="icon-btn icon-undock" onclick={toggleOutputDock} title="Undock">{@html undockIcon}</button>
         </div>
       </div>
       <div class="output-list">
@@ -1025,7 +1157,7 @@
   :global(.icon-btn) {
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
-    color: var(--text-secondary);
+    color: var(--text-secondary) !important;
     border-radius: 6px;
     padding: 5px 8px;
     cursor: pointer;
@@ -1037,11 +1169,70 @@
     line-height: 1;
   }
 
+  :global(.icon-btn svg) { width: 16px; height: 16px; color: inherit !important; }
+
   :global(.icon-btn:hover) {
-    color: var(--text-primary);
+    color: var(--accent) !important;
     border-color: var(--accent);
     background: var(--accent-bg-hover);
   }
+  :global(.icon-btn:hover svg) { color: var(--accent) !important; }
+
+  @keyframes spin-back-forward {
+    0% { transform: rotate(0deg); }
+    25% { transform: rotate(360deg); }
+    50% { transform: rotate(0deg); }
+    75% { transform: rotate(-360deg); }
+    100% { transform: rotate(0deg); }
+  }
+  @keyframes bounce-up {
+    0%, 100% { transform: translateY(0); }
+    25% { transform: translateY(-4px); }
+    50% { transform: translateY(0); }
+    75% { transform: translateY(-4px); }
+  }
+  @keyframes jiggle {
+    0%, 100% { transform: rotate(0deg); }
+    25% { transform: rotate(-15deg); }
+    75% { transform: rotate(15deg); }
+  }
+  @keyframes shrink-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(0.75); }
+  }
+  @keyframes jerk-down {
+    0%, 100% { transform: translateY(0); }
+    25% { transform: translateY(2px); }
+    50% { transform: translateY(0); }
+    75% { transform: translateY(2px); }
+  }
+  @keyframes shrink-subtle {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(0.889); }
+  }
+  @keyframes tilt-right {
+    0%, 100% { transform: rotate(0deg); }
+    50% { transform: rotate(20deg); }
+  }
+  @keyframes spin-slow {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+
+  :global(.icon-settings:hover svg) { animation: spin-back-forward 0.8s ease-in-out; }
+  :global(.color-wheel-btn:hover svg) { animation: spin-slow 1s linear; }
+  :global(.icon-undock:hover svg) { animation: bounce-up 0.5s ease-in-out; }
+  :global(.icon-clear:hover svg) { animation: jiggle 0.3s ease-in-out; }
+  :global(.icon-save:hover svg) { animation: shrink-pulse 0.4s ease-in-out; }
+  :global(.icon-load:hover svg) { animation: jerk-down 0.3s ease-in-out; }
+  :global(.icon-dock:hover svg) { animation: shrink-subtle 0.3s ease-in-out; }
+  :global(.icon-add:hover svg) { animation: tilt-right 0.4s ease-in-out; }
+  :global(.icon-remove:hover svg) { animation: jiggle 0.3s ease-in-out; }
+  :global(.icon-dock-panel:hover svg) { animation: shrink-subtle 0.3s ease-in-out; }
+
+  :global(.dock-btn svg) { color: currentColor; }
+  :global(.settings-btn svg) { color: currentColor; }
+  :global(.color-wheel-btn svg) { color: currentColor; }
 
   :global(.edit-link) {
     color: transparent;
@@ -1144,22 +1335,22 @@
     min-width: 200px;
   }
 
-  :global(.hamburger-btn) {
+  :global(.settings-btn) {
     position: absolute;
     top: 8px; left: 8px;
     z-index: 100;
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
-    color: var(--text-secondary);
     border-radius: 8px;
     width: 34px; height: 34px;
     display: flex; align-items: center; justify-content: center;
     cursor: pointer;
-    font-size: 16px;
     transition: all 0.15s ease;
   }
 
-  :global(.hamburger-btn:hover) { color: var(--text-primary); border-color: var(--accent); background: var(--accent-bg-hover); }
+  :global(.settings-btn) { color: var(--text-secondary); }
+  :global(.settings-btn svg) { width: 18px; height: 18px; color: inherit; }
+  :global(.settings-btn:hover) { color: var(--accent); border-color: var(--accent); background: var(--accent-bg-hover); }
 
   :global(.settings-panel) {
     position: absolute;
@@ -1186,6 +1377,9 @@
     font-weight: 600;
   }
 
+  :global(.settings-panel svg) { color: var(--accent) !important; }
+  :global(.vol-icon svg) { color: var(--accent) !important; }
+
   .color-wheel-btn {
     width: 100%;
     padding: 7px 12px;
@@ -1197,8 +1391,12 @@
     cursor: pointer;
     transition: all 0.15s ease;
     text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
 
+  .color-wheel-btn svg { width: 16px; height: 16px; color: var(--accent) !important; }
   .color-wheel-btn:hover { border-color: var(--accent); color: var(--text-primary); }
 
   .cp-wrap { padding-top: 6px; }
@@ -1220,7 +1418,8 @@
 
   /* Volume */
   .volume-row { display: flex; align-items: center; gap: 8px; }
-  .vol-icon { font-size: 14px; }
+  .vol-icon { font-size: 14px; display: flex; align-items: center; color: var(--accent); }
+  .vol-icon svg { width: 16px; height: 16px; }
   .volume-slider { flex: 1; accent-color: var(--accent); cursor: pointer; }
   .vol-label { font-size: 11px; color: var(--text-secondary); min-width: 32px; text-align: right; font-family: monospace; }
 
@@ -1230,7 +1429,8 @@
 
   /* Dock buttons */
   .dock-row { display: flex; flex-direction: column; gap: 5px; }
-  .dock-btn { width: 100%; padding: 6px 10px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 7px; color: var(--text-secondary); font-size: 11px; cursor: pointer; text-align: left; transition: all 0.15s ease; }
+  .dock-btn { width: 100%; padding: 6px 10px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 7px; color: var(--text-secondary); font-size: 11px; cursor: pointer; text-align: left; transition: all 0.15s ease; display: flex; align-items: center; gap: 6px; }
+  .dock-btn svg { width: 14px; height: 14px; color: var(--accent) !important; }
   .dock-btn.active { border-color: var(--accent); color: var(--text-primary); }
   .dock-btn:hover { border-color: var(--accent); color: var(--text-primary); }
 
