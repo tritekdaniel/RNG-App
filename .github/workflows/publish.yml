@@ -45,11 +45,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
+      - name: install create-dmg (macos only)
+        if: matrix.platform == 'macos-latest'
+        run: |
+          if command -v brew &> /dev/null; then brew install create-dmg; fi || true
+
       - name: install frontend dependencies
         run: cd svelte-app && npm install
 
       - name: fix binary permissions
         run: cd svelte-app && chmod +x node_modules/.bin/*
+
+      - name: fix bundle script permissions (macos only)
+        if: matrix.platform == 'macos-latest'
+        run: |
+          chmod +x svelte-app/target/*/release/bundle/dmg/*.sh 2>/dev/null || true
 
       - name: build frontend
         run: cd svelte-app && npm run build
