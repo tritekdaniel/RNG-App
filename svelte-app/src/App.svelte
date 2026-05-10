@@ -21,22 +21,59 @@
   import volumeHighIcon from './assets/Volume-high.svg?raw';
 
   import addSound from './assets/Add.m4a?url';
+  import addSoundMp3 from './assets/Add.mp3?url';
   import removeSound from './assets/Remove.m4a?url';
+  import removeSoundMp3 from './assets/Remove.mp3?url';
   import clearSound from './assets/Clear.m4a?url';
+  import clearSoundMp3 from './assets/Clear.mp3?url';
   import dockSound from './assets/Dock.m4a?url';
+  import dockSoundMp3 from './assets/Dock.mp3?url';
   import undockSound from './assets/Undock.m4a?url';
+  import undockSoundMp3 from './assets/Undock.mp3?url';
   import settingsOpenSound from './assets/SettingsOpen.m4a?url';
+  import settingsOpenSoundMp3 from './assets/SettingsOpen.mp3?url';
   import settingsCloseSound from './assets/SettingsClose.m4a?url';
+  import settingsCloseSoundMp3 from './assets/SettingsClose.mp3?url';
   import singleOutputSound from './assets/SingleOutput.m4a?url';
+  import singleOutputSoundMp3 from './assets/SingleOutput.mp3?url';
   import batchOutputSound from './assets/BatchOutput.m4a?url';
+  import batchOutputSoundMp3 from './assets/BatchOutput.mp3?url';
   import outOfInputsSound from './assets/OutOfInputs.m4a?url';
+  import outOfInputsSoundMp3 from './assets/OutOfInputs.mp3?url';
   import buttonGenericSound from './assets/ButtonGeneric.m4a?url';
+  import buttonGenericSoundMp3 from './assets/ButtonGeneric.mp3?url';
   import notificationSound from './assets/Notification.m4a?url';
+  import notificationSoundMp3 from './assets/Notification.mp3?url';
   import selectedItemSound from './assets/SelectedItem.m4a?url';
+  import selectedItemSoundMp3 from './assets/SelectedItem.mp3?url';
   import unselectedItemSound from './assets/UnSelectedItem.m4a?url';
+  import unselectedItemSoundMp3 from './assets/UnSelectedItem.mp3?url';
   import editItemSound from './assets/EditItem.m4a?url';
+  import editItemSoundMp3 from './assets/EditItem.mp3?url';
   import saveSound from './assets/Save.m4a?url';
+  import saveSoundMp3 from './assets/Save.mp3?url';
   import loadSound from './assets/Load.m4a?url';
+  import loadSoundMp3 from './assets/Load.mp3?url';
+
+  const soundMap = {
+    [addSound]: addSoundMp3,
+    [removeSound]: removeSoundMp3,
+    [clearSound]: clearSoundMp3,
+    [dockSound]: dockSoundMp3,
+    [undockSound]: undockSoundMp3,
+    [settingsOpenSound]: settingsOpenSoundMp3,
+    [settingsCloseSound]: settingsCloseSoundMp3,
+    [singleOutputSound]: singleOutputSoundMp3,
+    [batchOutputSound]: batchOutputSoundMp3,
+    [outOfInputsSound]: outOfInputsSoundMp3,
+    [buttonGenericSound]: buttonGenericSoundMp3,
+    [notificationSound]: notificationSoundMp3,
+    [selectedItemSound]: selectedItemSoundMp3,
+    [unselectedItemSound]: unselectedItemSoundMp3,
+    [editItemSound]: editItemSoundMp3,
+    [saveSound]: saveSoundMp3,
+    [loadSound]: loadSoundMp3,
+  };
 
   let inputs = $state([]);
   let outputs = $state([]);
@@ -137,8 +174,43 @@
   let svDragging = false;
   let hueDragging = false;
 
-  function playAudio(url) {
-    try { const a = new Audio(url); a.volume = volume ?? 1; a.play(); } catch (e) {}
+  let audioCtx = null;
+
+  function getAudioContext() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+  }
+
+  async function playAudio(url) {
+    const mp3Url = soundMap[url];
+    async function tryPlayAudio(audioUrl) {
+      try {
+        const ctx = getAudioContext();
+        if (ctx.state === 'suspended') await ctx.resume();
+        const response = await fetch(audioUrl);
+        const arrayBuffer = await response.arrayBuffer();
+        const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+        const source = ctx.createBufferSource();
+        source.buffer = audioBuffer;
+        const gainNode = ctx.createGain();
+        gainNode.gain.value = volume ?? 1;
+        source.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        source.start(0);
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+    if (!await tryPlayAudio(url)) {
+      if (mp3Url && !await tryPlayAudio(mp3Url)) {
+        try {
+          const a = new Audio(mp3Url);
+          a.volume = volume ?? 1;
+          a.play();
+        } catch (e) {}
+      }
+    }
   }
 
   function playSound(soundUrl) {
