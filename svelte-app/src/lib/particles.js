@@ -104,7 +104,7 @@ export class ParticleSystem {
   }
 
   startAnimation() {
-    if (this.particles.length > 0) {
+    if (this.particles.length > 0 && !this.animating) {
       this.animating = true;
       this.animate();
     }

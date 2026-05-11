@@ -101,20 +101,36 @@
   let colorPickerOpen = $state(false);
 
   // --- New settings ---
+  let theme = $state(localStorage.getItem('rng-theme') || 'dark');
   let particlesEnabled = $state(localStorage.getItem('rng-particles') !== 'false');
   let volume = $state(parseFloat(localStorage.getItem('rng-volume') ?? '1'));
   let shortcutKeys = $state(JSON.parse(localStorage.getItem('rng-shortcut') || 'null') || { alt: false, shift: true, ctrl: true, key: 'g', code: 'KeyG' });
   let recordingShortcut = $state(false);
   let notifyOnShortcut = $state(localStorage.getItem('rng-notify-shortcut') === 'true');
+  let inputFilter = $state('');
+  let outputFilter = $state('');
+  let dragIndex = $state(-1);
+  let dropIndex = $state(-1);
+  let focusedInputIndex = $state(-1);
+  let focusedOutputIndex = $state(-1);
   let shortcutDisplay = $derived(
     [shortcutKeys.ctrl && 'Ctrl', shortcutKeys.alt && 'Alt', shortcutKeys.shift && 'Shift', shortcutKeys.key?.toUpperCase()].filter(Boolean).join(' + ')
   );
+  let filteredInputIndices = $derived(inputFilter ? inputs.map((v, i) => ({ value: v, index: i })).filter(item => item.value.toLowerCase().includes(inputFilter.toLowerCase())) : inputs.map((v, i) => ({ value: v, index: i })));
+  let filteredOutputIndices = $derived(outputFilter ? outputs.map((v, i) => ({ value: v, index: i })).filter(item => item.value.toLowerCase().includes(outputFilter.toLowerCase())) : outputs.map((v, i) => ({ value: v, index: i })));
 
   // --- Dockable panels ---
   let inputDocked = $state(localStorage.getItem('rng-input-docked') !== 'false');
   let outputDocked = $state(localStorage.getItem('rng-output-docked') !== 'false');
   let inputPos = $state(JSON.parse(localStorage.getItem('rng-input-pos') || 'null') || { x: 20, y: 60 });
-  let outputPos = $state(JSON.parse(localStorage.getItem('rng-output-pos') || 'null') || { x: null, y: 60 });
+  // FIX: compute the default x position once at init rather than on every derived recompute
+  let outputPos = $state(JSON.parse(localStorage.getItem('rng-output-pos') || 'null') || { x: window.innerWidth - 310, y: 60 });
+
+  // FIX: declare event-unlisten handles at top level so onDestroy can always reach them
+  let unlistenState = null;
+  let unlistenDock = null;
+  let unlistenAccent = null;
+  let unlistenTheme = null;
 
   function setAccentColor(color) {
     const r = parseInt(color.slice(1,3), 16);
@@ -128,8 +144,16 @@
     document.documentElement.style.setProperty('--icon-filter', `matrix(${0.213 + 0.787*(1-rN)} ${0.715 - 0.715*rN} ${0.072 - 0.072*rN} 0 0 ${0.213 - 0.213*gN} ${0.715 + 0.285*(1-gN)} ${0.072 - 0.072*gN} 0 0 ${0.213 - 0.213*bN} ${0.715 - 0.715*bN} ${0.072 + 0.928*(1-bN)} 0 0 0 0 0 1 0)`);
   }
 
-  // Apply accent color synchronously before first render to avoid flash
+  function setTheme(newTheme) {
+    theme = newTheme;
+    localStorage.setItem('rng-theme', newTheme);
+    document.documentElement.setAttribute('data-theme', newTheme);
+    emit('theme-updated', { theme: newTheme });
+  }
+
+  // Apply accent color and theme synchronously before first render to avoid flash
   setAccentColor(tempColor);
+  document.documentElement.setAttribute('data-theme', theme);
 
   let svCanvasRef = $state(null);
   let svWrapRef = $state(null);
@@ -340,7 +364,7 @@
     return parts.join('+');
   }
 
-function setupDocumentShortcut() {
+  function setupDocumentShortcut() {
     if (shortcutHandler) document.removeEventListener('keydown', shortcutHandler);
     shortcutHandler = (e) => {
       if (matchesShortcut(e) && !recordingShortcut) {
@@ -402,6 +426,13 @@ function setupDocumentShortcut() {
       tempColor = color;
       setAccentColor(color);
       updateAccentColors(color);
+    });
+
+    // Listen for theme changes from other windows
+    unlistenTheme = await listen('theme-updated', (event) => {
+      const newTheme = event.payload.theme;
+      theme = newTheme;
+      document.documentElement.setAttribute('data-theme', newTheme);
     });
 
     // Listen for dock commands from standalone windows (only needed in main window)
@@ -521,12 +552,60 @@ function setupDocumentShortcut() {
     if (unlistenState) unlistenState();
     if (unlistenDock) unlistenDock();
     if (unlistenAccent) unlistenAccent();
-    await unregisterAllShortcuts();
+    if (unlistenTheme) unlistenTheme();
+    if (registeredShortcut) { try { await unregister(registeredShortcut); } catch {} registeredShortcut = null; }
     if (shortcutHandler) document.removeEventListener('keydown', shortcutHandler);
     if (deleteHandler) document.removeEventListener('keydown', deleteHandler);
     if (visibilityChangeHandler) document.removeEventListener('visibilitychange', visibilityChangeHandler);
     if (audioCtx) { audioCtx.close(); audioCtx = null; }
   });
+
+  function handleDragStart(e, index, listType) {
+    dragIndex = index;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', listType);
+  }
+
+  function handleDragOver(e, index) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    dropIndex = index;
+  }
+
+  function handleDragLeave() {
+    dropIndex = -1;
+  }
+
+  async function handleDrop(e, toIndex, listType) {
+    e.preventDefault();
+    const fromIndex = dragIndex;
+    if (fromIndex === -1 || fromIndex === toIndex) {
+      dragIndex = -1;
+      dropIndex = -1;
+      return;
+    }
+    playSound(buttonGenericSound);
+    if (listType === 'input') {
+      const item = inputs[fromIndex];
+      inputs.splice(fromIndex, 1);
+      inputs.splice(toIndex, 0, item);
+      await rpc('reorder_input', { fromIndex, toIndex });
+    } else {
+      const item = outputs[fromIndex];
+      outputs.splice(fromIndex, 1);
+      outputs.splice(toIndex, 0, item);
+      await rpc('reorder_output', { fromIndex, toIndex });
+    }
+    await refreshState();
+    emit('state-updated');
+    dragIndex = -1;
+    dropIndex = -1;
+  }
+
+  function handleDragEnd() {
+    dragIndex = -1;
+    dropIndex = -1;
+  }
 
   async function handleAddInput(value) {
     if (!value || !value.trim()) return;
@@ -581,47 +660,54 @@ function setupDocumentShortcut() {
     }
   }
 
+  // FIX: wrap in try/finally so `generating` is always reset even on unexpected errors;
+  // batch path is delegated cleanly without double-resetting the flag
   async function handleGenerate() {
     if (generating) return;
     generating = true;
-    if (inputs.length === 0) { generating = false; return; }
-    if (outputMode === 'batch') { await handleBatchGenerate(); generating = false; return; }
-    const result = await rpc('generate');
-    if (!result) {
-      showCompletionModal = true;
-      playSound(outOfInputsSound);
-      generating = false;
-      return;
-    }
-    latestOutput = result;
-    if (notifyOnShortcut && !document.hasFocus()) {
-      playSound(notificationSound);
-    } else {
-      playSound(singleOutputSound);
-    }
-    updateAccentColors(tempColor);
-    setAccentColor(tempColor);
-    if (particlesEnabled && outputCanvasRef) {
-      if (!outputParticleSystem || !outputCanvasRef.parentElement) {
-        const rect = outputCanvasRef.parentElement?.getBoundingClientRect();
-        if (rect?.width > 0) {
-          outputCanvasRef.width = rect.width;
-          outputCanvasRef.height = rect.height;
-          outputParticleSystem = new ParticleSystem(outputCanvasRef);
+    try {
+      if (inputs.length === 0) return;
+      if (outputMode === 'batch') {
+        await handleBatchGenerate();
+        return;
+      }
+      const result = await rpc('generate');
+      if (!result) {
+        showCompletionModal = true;
+        playSound(outOfInputsSound);
+        return;
+      }
+      latestOutput = result;
+      if (notifyOnShortcut && !document.hasFocus()) {
+        playSound(notificationSound);
+      } else {
+        playSound(singleOutputSound);
+      }
+      updateAccentColors(tempColor);
+      setAccentColor(tempColor);
+      if (particlesEnabled && outputCanvasRef) {
+        if (!outputParticleSystem || !outputCanvasRef.parentElement) {
+          const rect = outputCanvasRef.parentElement?.getBoundingClientRect();
+          if (rect?.width > 0) {
+            outputCanvasRef.width = rect.width;
+            outputCanvasRef.height = rect.height;
+            outputParticleSystem = new ParticleSystem(outputCanvasRef);
+          }
+        }
+        if (outputParticleSystem) {
+          outputParticleSystem.risingUpward(150, tempColor);
+          outputParticleSystem.startAnimation();
         }
       }
-      if (outputParticleSystem) {
-        outputParticleSystem.risingUpward(150, tempColor);
-        outputParticleSystem.startAnimation();
-      }
+      const latestField = document.querySelector('.latest-output-field');
+      if (latestField) { latestField.classList.add('pulse'); setTimeout(() => latestField.classList.remove('pulse'), 600); }
+      await refreshState();
+      emit('state-updated');
+      const centerPanel = document.querySelector('.center-panel');
+      if (centerPanel) { centerPanel.classList.remove('animate-border'); void centerPanel.offsetWidth; centerPanel.classList.add('animate-border'); }
+    } finally {
+      generating = false;
     }
-    const latestField = document.querySelector('.latest-output-field');
-    if (latestField) { latestField.classList.add('pulse'); setTimeout(() => latestField.classList.remove('pulse'), 600); }
-    await refreshState();
-    emit('state-updated');
-    const centerPanel = document.querySelector('.center-panel');
-    if (centerPanel) { centerPanel.classList.remove('animate-border'); void centerPanel.offsetWidth; centerPanel.classList.add('animate-border'); }
-    generating = false;
   }
 
   function toggleInputSelect(index) {
@@ -736,13 +822,14 @@ function setupDocumentShortcut() {
     playSound(buttonGenericSound);
   }
 
+  // FIX: no longer sets generating = false itself; handleGenerate owns that via finally
   async function handleBatchGenerate() {
-    if (inputs.length === 0) { generating = false; return; }
+    if (inputs.length === 0) return;
+    // batch_generate returns (Vec<String>, AppState) — destructure index 0 for the results array
     const [results] = await rpc('batch_generate');
     if (!results || results.length === 0) {
       showCompletionModal = true;
       playSound(outOfInputsSound);
-      generating = false;
       return;
     }
     latestOutput = null;
@@ -771,7 +858,6 @@ function setupDocumentShortcut() {
     emit('state-updated');
     const centerPanel = document.querySelector('.center-panel');
     if (centerPanel) { centerPanel.classList.remove('animate-border'); void centerPanel.offsetWidth; centerPanel.classList.add('animate-border'); }
-    generating = false;
   }
 
   // --- Shortcut recording ---
@@ -813,9 +899,6 @@ function setupDocumentShortcut() {
   // --- Docking ---
   let inputWindow = null;
   let outputWindow = null;
-  let unlistenState = null;
-  let unlistenDock = null;
-  let unlistenAccent = null;
 
   async function toggleInputDock() {
     if (inputDocked) {
@@ -899,7 +982,8 @@ function setupDocumentShortcut() {
   }
 
   let inputFloatStyle = $derived(`left: ${inputPos.x || 20}px; top: ${inputPos.y || 60}px;`);
-  let outputFloatStyle = $derived(`left: ${outputPos.x ?? (typeof window !== 'undefined' ? window.innerWidth - 310 : 700)}px; top: ${outputPos.y || 60}px;`);
+  // FIX: outputPos.x is always a number now (set at init), so no runtime fallback needed
+  let outputFloatStyle = $derived(`left: ${outputPos.x}px; top: ${outputPos.y || 60}px;`);
 </script>
 
 <!-- Shortcut recording overlay -->
@@ -943,22 +1027,31 @@ function setupDocumentShortcut() {
   <button class="icon-btn icon-dock" onclick={async () => { try { new Audio(dockSound).play(); } catch {} emit('dock-panel', { panel: 'inputs' }); }} title="Dock">{@html dockIcon}</button>
       </div>
     </div>
+    {#if inputs.length > 5}
+      <input type="text" class="filter-input" placeholder="Filter..." bind:value={inputFilter} />
+    {/if}
     <div class="input-list">
-      {#each inputs as item, i (i)}
-        {#if editingInputIndex === i}
+      {#each filteredInputIndices as { value: item, index: origIndex } (origIndex)}
+        {#if editingInputIndex === origIndex}
           <div class="list-item edit-mode" onclick={(e) => e.stopPropagation()}>
             <input type="text" class="edit-input" bind:value={editValue} autofocus
               onkeydown={(e) => { if (e.key === 'Enter') { saveEdit(); e.preventDefault(); } else if (e.key === 'Escape') { cancelEdit(); e.preventDefault(); } }} />
             <button class="edit-cancel" onclick={() => { cancelEdit(); playSound(buttonGenericSound); }}>✕</button>
           </div>
         {:else}
-          <div class="list-item" class:selected={inputSelections.includes(i)} data-index={i}
+          <div class="list-item" class:selected={inputSelections.includes(origIndex)} class:dragging={dragIndex === origIndex} class:drop-target={dropIndex === origIndex}
+            data-index={origIndex} draggable="true"
+            ondragstart={(e) => handleDragStart(e, origIndex, 'input')}
+            ondragover={(e) => handleDragOver(e, origIndex)}
+            ondragleave={handleDragLeave}
+            ondrop={(e) => handleDrop(e, origIndex, 'input')}
+            ondragend={handleDragEnd}
             onclick={(e) => handleItemSelect(e, 'input')} tabindex="0"
-            onkeydown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !e.target.classList.contains('checkmark')) { toggleInputSelect(i); e.preventDefault(); } }}>
-            <span class="checkmark-wrap"><input type="checkbox" class="checkmark" onclick={(e) => { e.stopPropagation(); toggleInputSelect(i); }} checked={inputSelections.includes(i)} /></span>
-            <span class="item-number">{i + 1}.</span>
+            onkeydown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); focusedInputIndex = Math.min(origIndex + 1, inputs.length - 1); document.querySelectorAll('.input-list .list-item')[focusedInputIndex]?.focus(); } else if (e.key === 'ArrowUp') { e.preventDefault(); focusedInputIndex = Math.max(origIndex - 1, 0); document.querySelectorAll('.input-list .list-item')[focusedInputIndex]?.focus(); } else if ((e.key === 'Enter' || e.key === ' ') && !e.target.classList.contains('checkmark')) { toggleInputSelect(origIndex); e.preventDefault(); } }}>
+            <span class="checkmark-wrap"><input type="checkbox" class="checkmark" onclick={(e) => { e.stopPropagation(); toggleInputSelect(origIndex); }} checked={inputSelections.includes(origIndex)} /></span>
+            <span class="item-number">{origIndex + 1}.</span>
             <span class="item-text">{item}</span>
-            <span class="edit-link" onclick={(e) => { e.stopPropagation(); startEditing(i, item); }}>Edit</span>
+            <span class="edit-link" onclick={(e) => { e.stopPropagation(); startEditing(origIndex, item); }}>Edit</span>
           </div>
         {/if}
       {:else}
@@ -984,15 +1077,23 @@ function setupDocumentShortcut() {
         <button class="icon-btn icon-dock" onclick={async () => { try { new Audio(dockSound).play(); } catch {} emit('dock-panel', { panel: 'outputs' }); }} title="Dock">{@html dockIcon}</button>
       </div>
     </div>
+    {#if outputs.length > 5}
+      <input type="text" class="filter-input" placeholder="Filter..." bind:value={outputFilter} />
+    {/if}
     <div class="output-list">
-      {#each outputs as item, i (i)}
-        <div class="list-item" class:latest-output-item={i === outputs.length - 1}
-          class:selected={outputSelections.includes(item)} data-value={item}
+      {#each filteredOutputIndices as { value: item, index: origIndex } (origIndex)}
+        <div class="list-item" class:latest-output-item={origIndex === outputs.length - 1} class:dragging={dragIndex === origIndex} class:drop-target={dropIndex === origIndex}
+          class:selected={outputSelections.includes(item)} data-value={item} draggable="true"
+          ondragstart={(e) => handleDragStart(e, origIndex, 'output')}
+          ondragover={(e) => handleDragOver(e, origIndex)}
+          ondragleave={handleDragLeave}
+          ondrop={(e) => handleDrop(e, origIndex, 'output')}
+          ondragend={handleDragEnd}
           onclick={(e) => handleItemSelect(e, 'output')} tabindex="0"
           onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { toggleOutputSelect(item); e.preventDefault(); } }}
           style="border-left: 3px solid var(--accent);">
           <span class="checkmark-wrap"><input type="checkbox" class="checkmark" onclick={(e) => { e.stopPropagation(); toggleOutputSelect(item); }} checked={outputSelections.includes(item)} /></span>
-          <span class="item-number">{i + 1}.</span>
+          <span class="item-number">{origIndex + 1}.</span>
           <span class="item-text">{item}</span>
         </div>
       {:else}
@@ -1025,22 +1126,31 @@ function setupDocumentShortcut() {
   <button class="icon-btn icon-undock" onclick={toggleInputDock} title="Undock">{@html undockIcon}</button>
         </div>
       </div>
+      {#if inputs.length > 5}
+        <input type="text" class="filter-input" placeholder="Filter..." bind:value={inputFilter} />
+      {/if}
       <div class="input-list">
-        {#each inputs as item, i (i)}
-          {#if editingInputIndex === i}
+        {#each filteredInputIndices as { value: item, index: origIndex } (origIndex)}
+          {#if editingInputIndex === origIndex}
             <div class="list-item edit-mode" onclick={(e) => e.stopPropagation()}>
               <input type="text" class="edit-input" bind:value={editValue} autofocus
                 onkeydown={(e) => { if (e.key === 'Enter') { saveEdit(); e.preventDefault(); } else if (e.key === 'Escape') { cancelEdit(); e.preventDefault(); } }} />
               <button class="edit-cancel" onclick={() => { cancelEdit(); playSound(buttonGenericSound); }}>✕</button>
             </div>
           {:else}
-            <div class="list-item" class:selected={inputSelections.includes(i)} data-index={i}
+            <div class="list-item" class:selected={inputSelections.includes(origIndex)} class:dragging={dragIndex === origIndex} class:drop-target={dropIndex === origIndex}
+              data-index={origIndex} draggable="true"
+              ondragstart={(e) => handleDragStart(e, origIndex, 'input')}
+              ondragover={(e) => handleDragOver(e, origIndex)}
+              ondragleave={handleDragLeave}
+              ondrop={(e) => handleDrop(e, origIndex, 'input')}
+              ondragend={handleDragEnd}
               onclick={(e) => handleItemSelect(e, 'input')} tabindex="0"
-              onkeydown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !e.target.classList.contains('checkmark')) { toggleInputSelect(i); e.preventDefault(); } }}>
-              <span class="checkmark-wrap"><input type="checkbox" class="checkmark" onclick={(e) => { e.stopPropagation(); toggleInputSelect(i); }} checked={inputSelections.includes(i)} /></span>
-              <span class="item-number">{i + 1}.</span>
+              onkeydown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); focusedInputIndex = Math.min(origIndex + 1, inputs.length - 1); document.querySelectorAll('.input-list .list-item')[focusedInputIndex]?.focus(); } else if (e.key === 'ArrowUp') { e.preventDefault(); focusedInputIndex = Math.max(origIndex - 1, 0); document.querySelectorAll('.input-list .list-item')[focusedInputIndex]?.focus(); } else if ((e.key === 'Enter' || e.key === ' ') && !e.target.classList.contains('checkmark')) { toggleInputSelect(origIndex); e.preventDefault(); } }}>
+              <span class="checkmark-wrap"><input type="checkbox" class="checkmark" onclick={(e) => { e.stopPropagation(); toggleInputSelect(origIndex); }} checked={inputSelections.includes(origIndex)} /></span>
+              <span class="item-number">{origIndex + 1}.</span>
               <span class="item-text">{item}</span>
-              <span class="edit-link" onclick={(e) => { e.stopPropagation(); startEditing(i, item); }}>Edit</span>
+              <span class="edit-link" onclick={(e) => { e.stopPropagation(); startEditing(origIndex, item); }}>Edit</span>
             </div>
           {/if}
         {:else}
@@ -1068,6 +1178,15 @@ function setupDocumentShortcut() {
           <button class={outputMode === 'single' ? 'mode-btn active' : 'mode-btn'} onclick={() => setOutputMode('single')}>Single</button>
           <button class={outputMode === 'batch' ? 'mode-btn active' : 'mode-btn'} onclick={() => setOutputMode('batch')}>Batch</button>
         </div>
+
+        <h3 style="margin-top:14px">Theme</h3>
+        <label class="toggle-row">
+          <span>Dark/Light</span>
+          <button class="toggle-btn" class:on={theme === 'light'}
+            onclick={() => { setTheme(theme === 'light' ? 'dark' : 'light'); playSound(buttonGenericSound); }}>
+            {theme === 'light' ? 'Light' : 'Dark'}
+          </button>
+        </label>
 
         <h3 style="margin-top:14px">Accent Color</h3>
         {#if !colorPickerOpen}
@@ -1167,15 +1286,23 @@ function setupDocumentShortcut() {
   <button class="icon-btn icon-undock" onclick={toggleOutputDock} title="Undock">{@html undockIcon}</button>
         </div>
       </div>
+      {#if outputs.length > 5}
+        <input type="text" class="filter-input" placeholder="Filter..." bind:value={outputFilter} />
+      {/if}
       <div class="output-list">
-        {#each outputs as item, i (i)}
-          <div class="list-item" class:latest-output-item={i === outputs.length - 1}
-            class:selected={outputSelections.includes(item)} data-value={item}
+        {#each filteredOutputIndices as { value: item, index: origIndex } (origIndex)}
+          <div class="list-item" class:latest-output-item={origIndex === outputs.length - 1} class:dragging={dragIndex === origIndex} class:drop-target={dropIndex === origIndex}
+            class:selected={outputSelections.includes(item)} data-value={item} draggable="true"
+            ondragstart={(e) => handleDragStart(e, origIndex, 'output')}
+            ondragover={(e) => handleDragOver(e, origIndex)}
+            ondragleave={handleDragLeave}
+            ondrop={(e) => handleDrop(e, origIndex, 'output')}
+            ondragend={handleDragEnd}
             onclick={(e) => handleItemSelect(e, 'output')} tabindex="0"
-            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { toggleOutputSelect(item); e.preventDefault(); } }}
+onkeydown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); focusedOutputIndex = Math.min(origIndex + 1, outputs.length - 1); document.querySelectorAll('.output-list .list-item')[focusedOutputIndex]?.focus(); } else if (e.key === 'ArrowUp') { e.preventDefault(); focusedOutputIndex = Math.max(origIndex - 1, 0); document.querySelectorAll('.output-list .list-item')[focusedOutputIndex]?.focus(); } else if (e.key === 'Enter' || e.key === ' ') { toggleOutputSelect(item); e.preventDefault(); } }}
             style="border-left: 3px solid var(--accent);">
             <span class="checkmark-wrap"><input type="checkbox" class="checkmark" onclick={(e) => { e.stopPropagation(); toggleOutputSelect(item); }} checked={outputSelections.includes(item)} /></span>
-            <span class="item-number">{i + 1}.</span>
+            <span class="item-number">{origIndex + 1}.</span>
             <span class="item-text">{item}</span>
           </div>
         {:else}
@@ -1197,8 +1324,8 @@ function setupDocumentShortcut() {
     --bg-primary: #121212;
     --bg-secondary: #151515;
     --bg-tertiary: #2e2d2b;
-    --bg-input-item: #1a1a1a;
-    --bg-output-item: #171717;
+    --bg-input-item: var(--bg-tertiary);
+    --bg-output-item: var(--bg-tertiary);
     --bg-quaternary: #202020;
     --border-color: #30363d;
     --text-primary: #e6edf3;
@@ -1219,7 +1346,7 @@ function setupDocumentShortcut() {
   .standalone-panel .output-list {
     flex: 1;
     overflow-y: auto;
-    padding: 0;
+    padding: 8px;
   }
 
   .standalone-panel .empty-state {
@@ -1264,9 +1391,15 @@ function setupDocumentShortcut() {
     overflow: hidden;
     position: relative;
     min-width: 0;
+    transition: opacity 0.25s ease, transform 0.25s ease;
   }
 
- 
+  :global(.app-layout.input-undocked .sidebar:first-child),
+  :global(.app-layout.output-undocked .sidebar:last-child) {
+    opacity: 0;
+    transform: scale(0.95);
+    pointer-events: none;
+  }
 
   :global(.sidebar-header) {
     padding: 12px 16px;
@@ -1409,8 +1542,8 @@ function setupDocumentShortcut() {
     -webkit-appearance: none;
     appearance: none;
     border-radius: 3px;
-    background-color: var(--bg-quaternary);
-    border: 1px solid var(--border-color);
+    background-color: var(--bg-tertiary);
+    border: 1px solid var(--text-secondary);
     cursor: pointer;
     flex-shrink: 0;
     transition: all 0.15s ease;
@@ -1438,7 +1571,7 @@ function setupDocumentShortcut() {
     padding: 9px 8px;
     margin-bottom: 3px;
     background: var(--bg-tertiary);
-    border: 1px solid transparent;
+    border: 1px solid var(--border-color);
     border-radius: 8px;
     cursor: pointer;
     transition: all 0.15s ease;
@@ -1469,6 +1602,15 @@ function setupDocumentShortcut() {
     min-width: 200px;
   }
 
+  /* FIX: added animate-border keyframe and class that was referenced in JS but missing from CSS */
+  @keyframes animate-border-pulse {
+    0%, 100% { border-color: var(--border-color); box-shadow: none; }
+    40% { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+  }
+  :global(.center-panel.animate-border) {
+    animation: animate-border-pulse 0.6s ease forwards;
+  }
+
   :global(.settings-btn) {
     position: absolute;
     top: 8px; left: 8px;
@@ -1485,6 +1627,7 @@ function setupDocumentShortcut() {
   :global(.settings-btn) { color: var(--text-secondary); }
   :global(.settings-btn svg) { width: 18px; height: 18px; color: inherit; }
   :global(.settings-btn:hover) { color: var(--accent); border-color: var(--accent); background: var(--accent-bg-hover); }
+  :global(.settings-btn:active svg) { animation: iconPulse 150ms ease-out; }
 
   :global(.settings-panel) {
     position: absolute;

@@ -97,6 +97,24 @@ impl AppState {
         }
     }
 
+    pub fn reorder_input(&mut self, from_index: usize, to_index: usize) -> Result<(), String> {
+        if from_index >= self.inputs.len() || to_index >= self.inputs.len() {
+            return Err("Index out of bounds".to_string());
+        }
+        let item = self.inputs.remove(from_index);
+        self.inputs.insert(to_index, item);
+        Ok(())
+    }
+
+    pub fn reorder_output(&mut self, from_index: usize, to_index: usize) -> Result<(), String> {
+        if from_index >= self.outputs.len() || to_index >= self.outputs.len() {
+            return Err("Index out of bounds".to_string());
+        }
+        let item = self.outputs.remove(from_index);
+        self.outputs.insert(to_index, item);
+        Ok(())
+    }
+
     pub fn remove_output(&mut self, value: &str) {
         if let Some(pos) = self.outputs.iter().position(|x| x == value) {
             self.outputs.remove(pos);
@@ -134,6 +152,8 @@ fn main() {
             remove_input,
             clear_inputs,
             update_input,
+            reorder_input,
+            reorder_output,
             generate,
             batch_generate,
             set_output_mode,
@@ -218,4 +238,26 @@ fn set_output_mode(state: tauri::State<AppStateWrapper>, mode: String) -> AppSta
 fn send_notification(app: tauri::AppHandle, title: String, body: String) {
     use tauri_plugin_notification::NotificationExt;
     let _ = app.notification().builder().title(&title).body(&body).show();
+}
+
+#[tauri::command]
+fn reorder_input(state: tauri::State<AppStateWrapper>, from_index: usize, to_index: usize) -> AppState {
+    let mut locked = state.0.lock().unwrap();
+    if from_index >= locked.inputs.len() || to_index >= locked.inputs.len() {
+        return locked.clone();
+    }
+    let item = locked.inputs.remove(from_index);
+    locked.inputs.insert(to_index, item);
+    locked.clone()
+}
+
+#[tauri::command]
+fn reorder_output(state: tauri::State<AppStateWrapper>, from_index: usize, to_index: usize) -> AppState {
+    let mut locked = state.0.lock().unwrap();
+    if from_index >= locked.outputs.len() || to_index >= locked.outputs.len() {
+        return locked.clone();
+    }
+    let item = locked.outputs.remove(from_index);
+    locked.outputs.insert(to_index, item);
+    locked.clone()
 }
