@@ -17,6 +17,10 @@ A desktop application for generating random values from a user-defined list of i
 - Customizable accent color with color picker
 - Global keyboard shortcut for quick access
 - UI sounds and hover animations
+- **Search/filter** - Quick filter when lists get long
+- **Drag-and-drop reordering** - Rearrange inputs/outputs
+- **Keyboard navigation** - Arrow keys to navigate list items
+- **Dark/Light theme** - Toggle between dark and light modes
 
 ## Screenshots
 
@@ -29,6 +33,10 @@ A desktop application for generating random values from a user-defined list of i
 ![Settings](examples/Screenshot%202026-05-10%20025149.png)
 
 ![Docked Panel Mode](examples/Screenshot%202026-05-10%20025347.png)
+
+![Filter and Drag-Drop](examples/Screenshot%202026-05-10%20225621.png)
+
+![Dark Theme](examples/Screenshot%202026-05-10%20225734.png)
 
 ## Tech Stack
 
