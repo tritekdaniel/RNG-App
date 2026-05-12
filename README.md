@@ -24,19 +24,15 @@ A desktop application for generating random values from a user-defined list of i
 
 ## Screenshots
 
-![Main Interface](examples/Screenshot%202026-05-10%20024915.png)
+![Main Interface](examples/notifications.png)
 
-![Input Management](examples/Screenshot%202026-05-10%20025000.png)
+![Docked Panel Mode](examples/undocked.png)
 
-![Output Tracking](examples/Screenshot%202026-05-10%20025058.png)
+![Filter and Drag-Drop](examples/dragndrop.png)
 
-![Settings](examples/Screenshot%202026-05-10%20025149.png)
+![Settings](examples/settingsarevariedyes.png)
 
-![Docked Panel Mode](examples/Screenshot%202026-05-10%20025347.png)
-
-![Filter and Drag-Drop](examples/Screenshot%202026-05-10%20225621.png)
-
-![Dark Theme](examples/Screenshot%202026-05-10%20225734.png)
+![Dark Theme](examples/coolappyes.png)
 
 ## Tech Stack
 

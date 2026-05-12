@@ -149,7 +149,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_state,
             add_input,
+            add_inputs,
             remove_input,
+            remove_inputs,
             clear_inputs,
             update_input,
             reorder_input,
@@ -158,6 +160,7 @@ fn main() {
             batch_generate,
             set_output_mode,
             remove_output,
+            remove_outputs,
             clear_outputs,
             send_notification
         ])
@@ -178,6 +181,15 @@ fn get_state(state: tauri::State<AppStateWrapper>) -> AppState {
 fn add_input(state: tauri::State<AppStateWrapper>, value: String) -> AppState {
     let mut locked = state.0.lock().unwrap();
     locked.add_input(value);
+    locked.clone()
+}
+
+#[tauri::command]
+fn add_inputs(state: tauri::State<AppStateWrapper>, values: Vec<String>) -> AppState {
+    let mut locked = state.0.lock().unwrap();
+    for value in values {
+        locked.add_input(value);
+    }
     locked.clone()
 }
 
@@ -204,6 +216,26 @@ fn generate(state: tauri::State<AppStateWrapper>) -> Option<String> {
 fn remove_output(state: tauri::State<AppStateWrapper>, value: String) -> AppState {
     let mut locked = state.0.lock().unwrap();
     locked.remove_output(&value);
+    locked.clone()
+}
+
+#[tauri::command]
+fn remove_inputs(state: tauri::State<AppStateWrapper>, indices: Vec<usize>) -> AppState {
+    let mut locked = state.0.lock().unwrap();
+    let mut sorted = indices.clone();
+    sorted.sort_by(|a, b| b.cmp(a));
+    for i in sorted {
+        locked.remove_input(i);
+    }
+    locked.clone()
+}
+
+#[tauri::command]
+fn remove_outputs(state: tauri::State<AppStateWrapper>, values: Vec<String>) -> AppState {
+    let mut locked = state.0.lock().unwrap();
+    for v in values {
+        locked.remove_output(&v);
+    }
     locked.clone()
 }
 

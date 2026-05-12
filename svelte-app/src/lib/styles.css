@@ -123,8 +123,14 @@ html, body {
   }
 }
 
-.input-list, .output-list {
+.list-wrapper {
   flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.input-list, .output-list {
+  height: 100%;
   overflow-y: auto;
   padding: 8px;
 }
@@ -173,6 +179,23 @@ html, body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  color: var(--text-secondary);
+  cursor: grab;
+  font-size: 12px;
+  letter-spacing: -2px;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
 }
 
 .list-item .remove-btn {
@@ -317,8 +340,14 @@ html, body {
   background: var(--accent-bg-hover);
 }
 
+.list-wrapper.is-dragging .list-item * {
+  pointer-events: none;
+}
+
 .list-item.drop-target {
-  border-top: 2px solid var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: 8px;
 }
 
 /* Theme menu */
@@ -495,10 +524,10 @@ html, body {
 }
 
 /* Gradient background animation */
-@keyframes gradientShift {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
+@keyframes gradientDrift {
+  0% { transform: translate(0, 0); }
+  50% { transform: translate(-5%, -5%); }
+  100% { transform: translate(0, 0); }
 }
 
 body::before {
@@ -510,7 +539,8 @@ body::before {
   height: 200%;
   background: radial-gradient(circle at 30% 40%, rgba(38, 62, 210, 0.03) 0%, transparent 50%),
               radial-gradient(circle at 70% 60%, rgba(139, 92, 246, 0.02) 0%, transparent 50%);
-  animation: gradientShift 20s ease infinite;
+  animation: gradientDrift 20s ease infinite;
+  will-change: transform;
   pointer-events: none;
   z-index: -1;
 }

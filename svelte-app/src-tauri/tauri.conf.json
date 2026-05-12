@@ -10,7 +10,7 @@
     "windows": [
       {
         "title": "RNG App",
-        "width": 900,
+        "width": 1000,
         "height": 600,
         "resizable": true,
         "fullscreen": false,

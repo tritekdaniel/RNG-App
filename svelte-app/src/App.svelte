@@ -1,5 +1,5 @@
 <script>
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { ParticleSystem } from './lib/particles.js';
   import { invoke } from '@tauri-apps/api/core';
   import { register, unregister, isRegistered } from '@tauri-apps/plugin-global-shortcut';
@@ -21,67 +21,34 @@
   import volumeLowIcon from './assets/Volume-low.svg?raw';
   import volumeHighIcon from './assets/Volume-high.svg?raw';
 
-  import addSound from './assets/Add.m4a?url';
-  import addSoundMp3 from './assets/Add.mp3?url';
+import addSound from './assets/Add.m4a?url';
   import removeSound from './assets/Remove.m4a?url';
-  import removeSoundMp3 from './assets/Remove.mp3?url';
   import clearSound from './assets/Clear.m4a?url';
-  import clearSoundMp3 from './assets/Clear.mp3?url';
   import dockSound from './assets/Dock.m4a?url';
-  import dockSoundMp3 from './assets/Dock.mp3?url';
   import undockSound from './assets/Undock.m4a?url';
-  import undockSoundMp3 from './assets/Undock.mp3?url';
   import settingsOpenSound from './assets/SettingsOpen.m4a?url';
-  import settingsOpenSoundMp3 from './assets/SettingsOpen.mp3?url';
   import settingsCloseSound from './assets/SettingsClose.m4a?url';
-  import settingsCloseSoundMp3 from './assets/SettingsClose.mp3?url';
   import singleOutputSound from './assets/SingleOutput.m4a?url';
-  import singleOutputSoundMp3 from './assets/SingleOutput.mp3?url';
   import batchOutputSound from './assets/BatchOutput.m4a?url';
-  import batchOutputSoundMp3 from './assets/BatchOutput.mp3?url';
   import outOfInputsSound from './assets/OutOfInputs.m4a?url';
-  import outOfInputsSoundMp3 from './assets/OutOfInputs.mp3?url';
   import buttonGenericSound from './assets/ButtonGeneric.m4a?url';
-  import buttonGenericSoundMp3 from './assets/ButtonGeneric.mp3?url';
   import notificationSound from './assets/Notification.m4a?url';
-  import notificationSoundMp3 from './assets/Notification.mp3?url';
   import selectedItemSound from './assets/SelectedItem.m4a?url';
-  import selectedItemSoundMp3 from './assets/SelectedItem.mp3?url';
   import unselectedItemSound from './assets/UnSelectedItem.m4a?url';
-  import unselectedItemSoundMp3 from './assets/UnSelectedItem.mp3?url';
   import editItemSound from './assets/EditItem.m4a?url';
-  import editItemSoundMp3 from './assets/EditItem.mp3?url';
   import saveSound from './assets/Save.m4a?url';
-  import saveSoundMp3 from './assets/Save.mp3?url';
   import loadSound from './assets/Load.m4a?url';
-  import loadSoundMp3 from './assets/Load.mp3?url';
   import volumeChangeSound from './assets/VolumeChange.m4a?url';
-  import volumeChangeSoundMp3 from './assets/VolumeChange.mp3?url';
-
-  const soundMap = {
-    [addSound]: addSoundMp3,
-    [removeSound]: removeSoundMp3,
-    [clearSound]: clearSoundMp3,
-    [dockSound]: dockSoundMp3,
-    [undockSound]: undockSoundMp3,
-    [settingsOpenSound]: settingsOpenSoundMp3,
-    [settingsCloseSound]: settingsCloseSoundMp3,
-    [singleOutputSound]: singleOutputSoundMp3,
-    [batchOutputSound]: batchOutputSoundMp3,
-    [outOfInputsSound]: outOfInputsSoundMp3,
-    [buttonGenericSound]: buttonGenericSoundMp3,
-    [notificationSound]: notificationSoundMp3,
-    [selectedItemSound]: selectedItemSoundMp3,
-    [unselectedItemSound]: unselectedItemSoundMp3,
-    [editItemSound]: editItemSoundMp3,
-    [saveSound]: saveSoundMp3,
-    [loadSound]: loadSoundMp3,
-    [volumeChangeSound]: volumeChangeSoundMp3,
-  };
+  import dragPickUpSound from './assets/DragPickUp.m4a?url';
+  import dragPutDownSound from './assets/DragPutDown.m4a?url';
 
   let inputs = $state([]);
   let outputs = $state([]);
   let latestOutput = $state(null);
+  let unlistenState = null;
+  let unlistenDock = null;
+  let unlistenAccent = null;
+  let unlistenTheme = null;
 
   // Check URL for panel parameter (for separate windows)
   const urlParams = new URLSearchParams(window.location.search);
@@ -105,32 +72,179 @@
   let particlesEnabled = $state(localStorage.getItem('rng-particles') !== 'false');
   let volume = $state(parseFloat(localStorage.getItem('rng-volume') ?? '1'));
   let shortcutKeys = $state(JSON.parse(localStorage.getItem('rng-shortcut') || 'null') || { alt: false, shift: true, ctrl: true, key: 'g', code: 'KeyG' });
+  let shortcutDisplay = $derived([shortcutKeys.ctrl && 'Ctrl', shortcutKeys.alt && 'Alt', shortcutKeys.shift && 'Shift', shortcutKeys.key?.toUpperCase()].filter(Boolean).join(' + '));
   let recordingShortcut = $state(false);
   let notifyOnShortcut = $state(localStorage.getItem('rng-notify-shortcut') === 'true');
   let inputFilter = $state('');
   let outputFilter = $state('');
-  let dragIndex = $state(-1);
-  let dropIndex = $state(-1);
+  function dragContainer(node, listType) {
+    let ghost = null;
+    let fromIndex = -1;
+    let currentDropIndex = -1;
+    let dragging = false;
+    const THRESHOLD = 4; // px movement before drag starts
+
+    function getItemAtPoint(x, y) {
+      // Temporarily hide ghost so elementFromPoint works
+      if (ghost) ghost.style.display = 'none';
+      const el = document.elementFromPoint(x, y)?.closest('.list-item[data-index]');
+      if (ghost) ghost.style.display = '';
+      return el;
+    }
+
+    function clearDropTargets() {
+      node.querySelectorAll('.list-item.drop-target').forEach(el => el.classList.remove('drop-target'));
+      currentDropIndex = -1;
+    }
+
+    function cleanup() {
+      if (ghost) { ghost.remove(); ghost = null; }
+      node.querySelectorAll('.list-item').forEach(el => {
+        el.classList.remove('dragging', 'drop-target');
+      });
+      node.classList.remove('is-dragging');
+      fromIndex = -1;
+      currentDropIndex = -1;
+      dragging = false;
+    }
+
+    function handlePointerDown(e) {
+      // Only left button, only from drag handle
+      if (e.button !== 0) return;
+      if (!e.target.closest('.drag-handle')) return;
+      const item = e.target.closest('.list-item[data-index]');
+      if (!item) return;
+
+      // Prevent click from selecting item if drag was attempted (even if not dragged far enough)
+      const parentItem = e.target.closest('.list-item');
+      if (parentItem) parentItem.dataset.dragAttempted = 'true';
+
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const datasetIndex = parseInt(item.dataset.index);
+
+      // Adjust fromIndex if filtering is active - dataset.index is position in filtered array
+      if (listType === 'input' && inputFilter) {
+        fromIndex = filteredInputIndices[datasetIndex]?.index ?? datasetIndex;
+      } else if (listType === 'output' && outputFilter) {
+        fromIndex = filteredOutputIndices[datasetIndex]?.index ?? datasetIndex;
+      } else {
+        fromIndex = datasetIndex;
+      }
+      dragging = false;
+
+      function onMove(ev) {
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+
+        if (!dragging) {
+          if (Math.abs(dx) < THRESHOLD && Math.abs(dy) < THRESHOLD) return;
+          // Threshold crossed — start drag
+          dragging = true;
+          item.classList.add('dragging');
+          node.classList.add('is-dragging');
+          playSound(dragPickUpSound);
+
+          // Create ghost
+          ghost = item.cloneNode(true);
+          ghost.style.cssText = `
+            position: fixed;
+            pointer-events: none;
+            z-index: 9999;
+            width: ${item.offsetWidth}px;
+            opacity: 0.85;
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+            transform: rotate(1.5deg) scale(1.02);
+            transition: none;
+            left: ${item.getBoundingClientRect().left}px;
+            top: ${item.getBoundingClientRect().top}px;
+          `;
+          document.body.appendChild(ghost);
+        }
+
+        if (!dragging) return;
+
+        // Move ghost - position under cursor, not centered
+        ghost.style.left = `${ev.clientX}px`;
+        ghost.style.top = `${ev.clientY}px`;
+
+        // Find drop target
+        const target = getItemAtPoint(ev.clientX, ev.clientY);
+        if (!target) { clearDropTargets(); return; }
+        const idx = parseInt(target.dataset.index);
+        if (idx === currentDropIndex) return;
+        clearDropTargets();
+        if (idx !== fromIndex) { target.classList.add('drop-target'); currentDropIndex = idx; }
+      }
+
+      async function onUp(ev) {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+
+        if (!dragging) { cleanup(); return; }
+
+        const target = getItemAtPoint(ev.clientX, ev.clientY);
+        if (!target) { cleanup(); return; }
+
+        const datasetIndex = parseInt(target.dataset.index);
+        const fi = fromIndex;
+        let toIndex = datasetIndex;
+
+        // Adjust toIndex if filtering is active - dataset.index is position in filtered array
+        if (listType === 'input' && inputFilter) {
+          const filtered = filteredInputIndices;
+          toIndex = filtered[datasetIndex]?.index ?? datasetIndex;
+        } else if (listType === 'output' && outputFilter) {
+          const filtered = filteredOutputIndices;
+          toIndex = filtered[datasetIndex]?.index ?? datasetIndex;
+        }
+
+        cleanup();
+
+        if (toIndex === fi) {
+          // No reorder - flag stays set to prevent selection, will be cleared by next pointerdown
+          return;
+        }
+
+        // Reorder happened - clear the flag so normal selection works next time
+        node.querySelectorAll('.list-item').forEach(el => delete el.dataset.dragAttempted);
+
+        playSound(dragPutDownSound);
+        if (listType === 'input') {
+          const el = inputs[fi];
+          inputs.splice(fi, 1);
+          inputs.splice(toIndex, 0, el);
+          inputs = [...inputs];
+          await rpc('reorder_input', { fromIndex: fi, toIndex });
+        } else {
+          const el = outputs[fi];
+          outputs.splice(fi, 1);
+          outputs.splice(toIndex, 0, el);
+          outputs = [...outputs];
+          await rpc('reorder_output', { fromIndex: fi, toIndex });
+        }
+        emit('state-updated');
+      }
+
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    }
+
+    node.addEventListener('pointerdown', handlePointerDown);
+    return {
+      destroy() {
+        node.removeEventListener('pointerdown', handlePointerDown);
+        cleanup();
+      }
+    };
+  }
   let focusedInputIndex = $state(-1);
   let focusedOutputIndex = $state(-1);
-  let shortcutDisplay = $derived(
-    [shortcutKeys.ctrl && 'Ctrl', shortcutKeys.alt && 'Alt', shortcutKeys.shift && 'Shift', shortcutKeys.key?.toUpperCase()].filter(Boolean).join(' + ')
-  );
-  let filteredInputIndices = $derived(inputFilter ? inputs.map((v, i) => ({ value: v, index: i })).filter(item => item.value.toLowerCase().includes(inputFilter.toLowerCase())) : inputs.map((v, i) => ({ value: v, index: i })));
-  let filteredOutputIndices = $derived(outputFilter ? outputs.map((v, i) => ({ value: v, index: i })).filter(item => item.value.toLowerCase().includes(outputFilter.toLowerCase())) : outputs.map((v, i) => ({ value: v, index: i })));
-
-  // --- Dockable panels ---
   let inputDocked = $state(localStorage.getItem('rng-input-docked') !== 'false');
   let outputDocked = $state(localStorage.getItem('rng-output-docked') !== 'false');
-  let inputPos = $state(JSON.parse(localStorage.getItem('rng-input-pos') || 'null') || { x: 20, y: 60 });
-  // FIX: compute the default x position once at init rather than on every derived recompute
-  let outputPos = $state(JSON.parse(localStorage.getItem('rng-output-pos') || 'null') || { x: window.innerWidth - 310, y: 60 });
-
-  // FIX: declare event-unlisten handles at top level so onDestroy can always reach them
-  let unlistenState = null;
-  let unlistenDock = null;
-  let unlistenAccent = null;
-  let unlistenTheme = null;
+  let filteredInputIndices = $derived(inputFilter ? inputs.map((v, i) => ({ value: v, index: i })).filter(item => item.value.toLowerCase().includes(inputFilter.toLowerCase())) : inputs.map((v, i) => ({ value: v, index: i })));
+  let filteredOutputIndices = $derived(outputFilter ? outputs.map((v, i) => ({ value: v, index: i })).filter(item => item.value.toLowerCase().includes(outputFilter.toLowerCase())) : outputs.map((v, i) => ({ value: v, index: i })));
 
   function setAccentColor(color) {
     const r = parseInt(color.slice(1,3), 16);
@@ -206,6 +320,7 @@
   let hueDragging = false;
 
   let audioCtx = null;
+  const audioBufferCache = new Map();
 
   function getAudioContext() {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -213,35 +328,26 @@
   }
 
   async function playAudio(url) {
-    const mp3Url = soundMap[url];
-    async function tryPlayAudio(audioUrl) {
-      try {
-        const ctx = getAudioContext();
-        if (ctx.state === 'suspended') await ctx.resume();
-        const response = await fetch(audioUrl);
+    try {
+      const ctx = getAudioContext();
+      if (ctx.state === 'suspended') await ctx.resume();
+      let audioBuffer;
+      if (audioBufferCache.has(url)) {
+        audioBuffer = audioBufferCache.get(url);
+      } else {
+        const response = await fetch(url);
         const arrayBuffer = await response.arrayBuffer();
-        const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-        const source = ctx.createBufferSource();
-        source.buffer = audioBuffer;
-        const gainNode = ctx.createGain();
-        gainNode.gain.value = volume ?? 1;
-        source.connect(gainNode);
-        gainNode.connect(ctx.destination);
-        source.start(0);
-        return true;
-      } catch (e) {
-        return false;
+        audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+        audioBufferCache.set(url, audioBuffer);
       }
-    }
-    if (!await tryPlayAudio(url)) {
-      if (mp3Url && !await tryPlayAudio(mp3Url)) {
-        try {
-          const a = new Audio(mp3Url);
-          a.volume = volume ?? 1;
-          a.play();
-        } catch (e) {}
-      }
-    }
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+      const gainNode = ctx.createGain();
+      gainNode.gain.value = volume ?? 1;
+      source.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      source.start(0);
+    } catch (e) {}
   }
 
   function playSound(soundUrl) {
@@ -316,6 +422,7 @@
       outputMode = state.output_mode || 'single';
 
       if (outputs.length > prevOutputsLen && particlesEnabled && particleSystem && canvasRef) {
+        await tick();
         const lastOutputEl = document.querySelector('.latest-output-item');
         if (lastOutputEl) {
           const elRect = lastOutputEl.getBoundingClientRect();
@@ -506,6 +613,7 @@
       if (rect.width > 0 && rect.height > 0) {
         ref.width = rect.width;
         ref.height = rect.height;
+        if (outputParticleSystem) outputParticleSystem.destroy();
         outputParticleSystem = new ParticleSystem(ref);
       }
     }, 50);
@@ -517,22 +625,26 @@
     const _enabled = particlesEnabled;
     if (!_enabled || outputs.length === 0 || !particleSystem) return;
     const el = document.querySelector('.latest-output-item');
-    if (!el) return;
+    if (!el || !canvasRef) return;
     const canvasRect = canvasRef.getBoundingClientRect();
+    const rect = el.getBoundingClientRect();
     const sparkleInterval = setInterval(() => {
       if (!particlesEnabled || outputs.length === 0 || !particleSystem) return;
-      const el = document.querySelector('.latest-output-item');
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
+      const currentEl = document.querySelector('.latest-output-item');
+      if (!currentEl) return;
+      const currentRect = currentEl.getBoundingClientRect();
+      const prevCount = particleSystem.particles.length;
       for (let i = 0; i < 2; i++) {
         particleSystem.particles.push({
-          x: rect.left - canvasRect.left + Math.random() * rect.width,
-          y: rect.bottom - canvasRect.top,
+          x: currentRect.left - canvasRect.left + Math.random() * currentRect.width,
+          y: currentRect.bottom - canvasRect.top,
           vx: (Math.random() - 0.5) * 0.3, vy: -(0.4 + Math.random() * 0.6),
           size: 1.5 + Math.random() * 2, alpha: 0.5, color: tempColor,
         });
       }
-      particleSystem.startAnimation();
+      if (particleSystem.particles.length > prevCount) {
+        particleSystem.startAnimation();
+      }
     }, 300);
     return () => clearInterval(sparkleInterval);
   });
@@ -558,66 +670,24 @@
     if (deleteHandler) document.removeEventListener('keydown', deleteHandler);
     if (visibilityChangeHandler) document.removeEventListener('visibilitychange', visibilityChangeHandler);
     if (audioCtx) { audioCtx.close(); audioCtx = null; }
+    if (particleSystem) particleSystem.destroy();
+    if (outputParticleSystem) outputParticleSystem.destroy();
   });
-
-  function handleDragStart(e, index, listType) {
-    dragIndex = index;
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', listType);
-  }
-
-  function handleDragOver(e, index) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    dropIndex = index;
-  }
-
-  function handleDragLeave() {
-    dropIndex = -1;
-  }
-
-  async function handleDrop(e, toIndex, listType) {
-    e.preventDefault();
-    const fromIndex = dragIndex;
-    if (fromIndex === -1 || fromIndex === toIndex) {
-      dragIndex = -1;
-      dropIndex = -1;
-      return;
-    }
-    playSound(buttonGenericSound);
-    if (listType === 'input') {
-      const item = inputs[fromIndex];
-      inputs.splice(fromIndex, 1);
-      inputs.splice(toIndex, 0, item);
-      await rpc('reorder_input', { fromIndex, toIndex });
-    } else {
-      const item = outputs[fromIndex];
-      outputs.splice(fromIndex, 1);
-      outputs.splice(toIndex, 0, item);
-      await rpc('reorder_output', { fromIndex, toIndex });
-    }
-    await refreshState();
-    emit('state-updated');
-    dragIndex = -1;
-    dropIndex = -1;
-  }
-
-  function handleDragEnd() {
-    dragIndex = -1;
-    dropIndex = -1;
-  }
 
   async function handleAddInput(value) {
     if (!value || !value.trim()) return;
     const parts = value.split('|').map(s => s.trim()).filter(Boolean);
-    for (const part of parts) await rpc('add_input', { value: part });
-    await refreshState();
+    if (parts.length === 1) {
+      await rpc('add_input', { value: parts[0] });
+    } else {
+      await rpc('add_inputs', { values: parts });
+    }
     emit('state-updated');
     playSound(addSound);
   }
 
   async function handleClearInputs() {
-    await rpc('clear_inputs'); inputSelections = []; await refreshState();
+    await rpc('clear_inputs'); inputSelections = [];
     playSound(clearSound);
     emit('state-updated');
   }
@@ -647,9 +717,8 @@
         const text = await readTextFile(path);
         const loaded = JSON.parse(text);
         if (Array.isArray(loaded)) {
-          for (const item of loaded) {
-            await rpc('add_input', { value: String(item) });
-          }
+          const items = loaded.map(item => String(item));
+          await rpc('add_inputs', { values: items });
           await refreshState();
           emit('state-updated');
           playSound(loadSound);
@@ -701,7 +770,6 @@
       }
       const latestField = document.querySelector('.latest-output-field');
       if (latestField) { latestField.classList.add('pulse'); setTimeout(() => latestField.classList.remove('pulse'), 600); }
-      await refreshState();
       emit('state-updated');
       const centerPanel = document.querySelector('.center-panel');
       if (centerPanel) { centerPanel.classList.remove('animate-border'); void centerPanel.offsetWidth; centerPanel.classList.add('animate-border'); }
@@ -717,9 +785,9 @@
 
   async function handleBatchRemoveInputs() {
     if (inputSelections.length === 0) return;
-    const indices = [...inputSelections].sort((a, b) => b - a);
-    for (const i of indices) await rpc('remove_input', { index: i });
-    inputSelections = []; await refreshState();
+    const indices = [...inputSelections];
+    await rpc('remove_inputs', { indices });
+    inputSelections = [];
     emit('state-updated');
     playSound(removeSound);
   }
@@ -739,14 +807,19 @@
 
   async function handleBatchRemoveOutputs() {
     if (outputSelections.length === 0) return;
-    for (const v of outputSelections) await rpc('remove_output', { value: v });
-    outputSelections = []; await refreshState();
+    await rpc('remove_outputs', { values: outputSelections });
+    outputSelections = [];
     emit('state-updated');
     playSound(removeSound);
   }
 
   function handleItemSelect(e, type) {
     if (e.target.classList.contains('checkmark')) return;
+    // Prevent selection if drag was attempted from drag handle
+    if (e.currentTarget.dataset.dragAttempted === 'true') {
+      e.currentTarget.dataset.dragAttempted = 'false';
+      return;
+    }
     if (type === 'input') {
       const index = parseInt(e.currentTarget.dataset.index);
       if (e.shiftKey && lastInputSelectionIndex >= 0) {
@@ -781,7 +854,7 @@
 
   async function handleClearOutputs() {
     showCompletionModal = false;
-    await rpc('clear_outputs'); latestOutput = null; outputSelections = []; await refreshState();
+    await rpc('clear_outputs'); latestOutput = null; outputSelections = [];
     emit('state-updated');
     playSound(clearSound);
   }
@@ -808,7 +881,7 @@
   async function saveEdit() {
     if (editingInputIndex === -1 || !editValue.trim()) return;
     await rpc('update_input', { index: editingInputIndex, value: editValue.trim() });
-    editingInputIndex = -1; editValue = ''; await refreshState();
+    editingInputIndex = -1; editValue = '';
     emit('state-updated');
     playSound(addSound);
   }
@@ -888,6 +961,7 @@
       };
       localStorage.setItem('rng-shortcut', JSON.stringify(shortcutKeys));
       recordingShortcut = false;
+      playSound(notificationSound);
       document.removeEventListener('keydown', captureListener, true);
       captureListener = null;
       setupDocumentShortcut();
@@ -1030,33 +1104,31 @@
     {#if inputs.length > 5}
       <input type="text" class="filter-input" placeholder="Filter..." bind:value={inputFilter} />
     {/if}
-    <div class="input-list">
-      {#each filteredInputIndices as { value: item, index: origIndex } (origIndex)}
-        {#if editingInputIndex === origIndex}
-          <div class="list-item edit-mode" onclick={(e) => e.stopPropagation()}>
-            <input type="text" class="edit-input" bind:value={editValue} autofocus
-              onkeydown={(e) => { if (e.key === 'Enter') { saveEdit(); e.preventDefault(); } else if (e.key === 'Escape') { cancelEdit(); e.preventDefault(); } }} />
-            <button class="edit-cancel" onclick={() => { cancelEdit(); playSound(buttonGenericSound); }}>✕</button>
-          </div>
+    <div class="list-wrapper" use:dragContainer={'input'}>
+      <div class="input-list">
+        {#each filteredInputIndices as { value: item, index: origIndex } (origIndex)}
+          {#if editingInputIndex === origIndex}
+            <div class="list-item edit-mode" onclick={(e) => e.stopPropagation()}>
+              <input type="text" class="edit-input" bind:value={editValue} autofocus
+                onkeydown={(e) => { if (e.key === 'Enter') { saveEdit(); e.preventDefault(); } else if (e.key === 'Escape') { cancelEdit(); e.preventDefault(); } }} />
+              <button class="edit-cancel" onclick={() => { cancelEdit(); playSound(buttonGenericSound); }}>✕</button>
+            </div>
+          {:else}
+            <div class="list-item" class:selected={inputSelections.includes(origIndex)}
+              data-index={origIndex}
+              onclick={(e) => handleItemSelect(e, 'input')} tabindex="0"
+              onkeydown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); focusedInputIndex = Math.min(origIndex + 1, inputs.length - 1); document.querySelectorAll('.input-list .list-item')[focusedInputIndex]?.focus(); } else if (e.key === 'ArrowUp') { e.preventDefault(); focusedInputIndex = Math.max(origIndex - 1, 0); document.querySelectorAll('.input-list .list-item')[focusedInputIndex]?.focus(); } else if ((e.key === 'Enter' || e.key === ' ') && !e.target.classList.contains('checkmark')) { toggleInputSelect(origIndex); e.preventDefault(); } }}>
+              <span class="drag-handle" title="Drag to reorder">⋮⋮</span>
+              <span class="checkmark-wrap"><input type="checkbox" class="checkmark" onclick={(e) => { e.stopPropagation(); toggleInputSelect(origIndex); }} checked={inputSelections.includes(origIndex)} /></span>
+              <span class="item-number">{origIndex + 1}.</span>
+              <span class="item-text">{item}</span>
+              <span class="edit-link" onclick={(e) => { e.stopPropagation(); startEditing(origIndex, item); }}>Edit</span>
+            </div>
+          {/if}
         {:else}
-          <div class="list-item" class:selected={inputSelections.includes(origIndex)} class:dragging={dragIndex === origIndex} class:drop-target={dropIndex === origIndex}
-            data-index={origIndex} draggable="true"
-            ondragstart={(e) => handleDragStart(e, origIndex, 'input')}
-            ondragover={(e) => handleDragOver(e, origIndex)}
-            ondragleave={handleDragLeave}
-            ondrop={(e) => handleDrop(e, origIndex, 'input')}
-            ondragend={handleDragEnd}
-            onclick={(e) => handleItemSelect(e, 'input')} tabindex="0"
-            onkeydown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); focusedInputIndex = Math.min(origIndex + 1, inputs.length - 1); document.querySelectorAll('.input-list .list-item')[focusedInputIndex]?.focus(); } else if (e.key === 'ArrowUp') { e.preventDefault(); focusedInputIndex = Math.max(origIndex - 1, 0); document.querySelectorAll('.input-list .list-item')[focusedInputIndex]?.focus(); } else if ((e.key === 'Enter' || e.key === ' ') && !e.target.classList.contains('checkmark')) { toggleInputSelect(origIndex); e.preventDefault(); } }}>
-            <span class="checkmark-wrap"><input type="checkbox" class="checkmark" onclick={(e) => { e.stopPropagation(); toggleInputSelect(origIndex); }} checked={inputSelections.includes(origIndex)} /></span>
-            <span class="item-number">{origIndex + 1}.</span>
-            <span class="item-text">{item}</span>
-            <span class="edit-link" onclick={(e) => { e.stopPropagation(); startEditing(origIndex, item); }}>Edit</span>
-          </div>
-        {/if}
-      {:else}
-        <div class="empty-state">No inputs added yet</div>
-      {/each}
+          <div class="empty-state">No inputs added yet</div>
+        {/each}
+      </div>
     </div>
     <div class="add-input-container">
       <input id="inputFieldStandalone" type="text" class="add-input" placeholder="Type and press Enter..."
@@ -1080,25 +1152,22 @@
     {#if outputs.length > 5}
       <input type="text" class="filter-input" placeholder="Filter..." bind:value={outputFilter} />
     {/if}
-    <div class="output-list">
-      {#each filteredOutputIndices as { value: item, index: origIndex } (origIndex)}
-        <div class="list-item" class:latest-output-item={origIndex === outputs.length - 1} class:dragging={dragIndex === origIndex} class:drop-target={dropIndex === origIndex}
-          class:selected={outputSelections.includes(item)} data-value={item} draggable="true"
-          ondragstart={(e) => handleDragStart(e, origIndex, 'output')}
-          ondragover={(e) => handleDragOver(e, origIndex)}
-          ondragleave={handleDragLeave}
-          ondrop={(e) => handleDrop(e, origIndex, 'output')}
-          ondragend={handleDragEnd}
-          onclick={(e) => handleItemSelect(e, 'output')} tabindex="0"
-          onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { toggleOutputSelect(item); e.preventDefault(); } }}
-          style="border-left: 3px solid var(--accent);">
-          <span class="checkmark-wrap"><input type="checkbox" class="checkmark" onclick={(e) => { e.stopPropagation(); toggleOutputSelect(item); }} checked={outputSelections.includes(item)} /></span>
-          <span class="item-number">{origIndex + 1}.</span>
-          <span class="item-text">{item}</span>
-        </div>
-      {:else}
-        <div class="empty-state">No outputs yet</div>
-      {/each}
+    <div class="list-wrapper">
+      <div class="output-list">
+        {#each filteredOutputIndices as { value: item, index: origIndex } (origIndex)}
+          <div class="list-item" class:latest-output-item={origIndex === outputs.length - 1}
+            class:selected={outputSelections.includes(item)} data-index={origIndex} data-value={item}
+            onclick={(e) => handleItemSelect(e, 'output')} tabindex="0"
+            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { toggleOutputSelect(item); e.preventDefault(); } }}
+            style="border-left: 3px solid var(--accent);">
+            <span class="checkmark-wrap"><input type="checkbox" class="checkmark" onclick={(e) => { e.stopPropagation(); toggleOutputSelect(item); }} checked={outputSelections.includes(item)} /></span>
+            <span class="item-number">{origIndex + 1}.</span>
+            <span class="item-text">{item}</span>
+          </div>
+        {:else}
+          <div class="empty-state">No outputs yet</div>
+        {/each}
+      </div>
     </div>
   </div>
 {:else}
@@ -1129,33 +1198,31 @@
       {#if inputs.length > 5}
         <input type="text" class="filter-input" placeholder="Filter..." bind:value={inputFilter} />
       {/if}
-      <div class="input-list">
-        {#each filteredInputIndices as { value: item, index: origIndex } (origIndex)}
-          {#if editingInputIndex === origIndex}
-            <div class="list-item edit-mode" onclick={(e) => e.stopPropagation()}>
-              <input type="text" class="edit-input" bind:value={editValue} autofocus
-                onkeydown={(e) => { if (e.key === 'Enter') { saveEdit(); e.preventDefault(); } else if (e.key === 'Escape') { cancelEdit(); e.preventDefault(); } }} />
-              <button class="edit-cancel" onclick={() => { cancelEdit(); playSound(buttonGenericSound); }}>✕</button>
-            </div>
+      <div class="list-wrapper" use:dragContainer={'input'}>
+        <div class="input-list">
+          {#each filteredInputIndices as { value: item, index: origIndex } (origIndex)}
+            {#if editingInputIndex === origIndex}
+              <div class="list-item edit-mode" onclick={(e) => e.stopPropagation()}>
+                <input type="text" class="edit-input" bind:value={editValue} autofocus
+                  onkeydown={(e) => { if (e.key === 'Enter') { saveEdit(); e.preventDefault(); } else if (e.key === 'Escape') { cancelEdit(); e.preventDefault(); } }} />
+                <button class="edit-cancel" onclick={() => { cancelEdit(); playSound(buttonGenericSound); }}>✕</button>
+              </div>
+            {:else}
+              <div class="list-item" class:selected={inputSelections.includes(origIndex)}
+                data-index={origIndex}
+                onclick={(e) => handleItemSelect(e, 'input')} tabindex="0"
+                onkeydown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); focusedInputIndex = Math.min(origIndex + 1, inputs.length - 1); document.querySelectorAll('.input-list .list-item')[focusedInputIndex]?.focus(); } else if (e.key === 'ArrowUp') { e.preventDefault(); focusedInputIndex = Math.max(origIndex - 1, 0); document.querySelectorAll('.input-list .list-item')[focusedInputIndex]?.focus(); } else if ((e.key === 'Enter' || e.key === ' ') && !e.target.classList.contains('checkmark')) { toggleInputSelect(origIndex); e.preventDefault(); } }}>
+                <span class="drag-handle" title="Drag to reorder">⋮⋮</span>
+                <span class="checkmark-wrap"><input type="checkbox" class="checkmark" onclick={(e) => { e.stopPropagation(); toggleInputSelect(origIndex); }} checked={inputSelections.includes(origIndex)} /></span>
+                <span class="item-number">{origIndex + 1}.</span>
+                <span class="item-text">{item}</span>
+                <span class="edit-link" onclick={(e) => { e.stopPropagation(); startEditing(origIndex, item); }}>Edit</span>
+              </div>
+            {/if}
           {:else}
-            <div class="list-item" class:selected={inputSelections.includes(origIndex)} class:dragging={dragIndex === origIndex} class:drop-target={dropIndex === origIndex}
-              data-index={origIndex} draggable="true"
-              ondragstart={(e) => handleDragStart(e, origIndex, 'input')}
-              ondragover={(e) => handleDragOver(e, origIndex)}
-              ondragleave={handleDragLeave}
-              ondrop={(e) => handleDrop(e, origIndex, 'input')}
-              ondragend={handleDragEnd}
-              onclick={(e) => handleItemSelect(e, 'input')} tabindex="0"
-              onkeydown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); focusedInputIndex = Math.min(origIndex + 1, inputs.length - 1); document.querySelectorAll('.input-list .list-item')[focusedInputIndex]?.focus(); } else if (e.key === 'ArrowUp') { e.preventDefault(); focusedInputIndex = Math.max(origIndex - 1, 0); document.querySelectorAll('.input-list .list-item')[focusedInputIndex]?.focus(); } else if ((e.key === 'Enter' || e.key === ' ') && !e.target.classList.contains('checkmark')) { toggleInputSelect(origIndex); e.preventDefault(); } }}>
-              <span class="checkmark-wrap"><input type="checkbox" class="checkmark" onclick={(e) => { e.stopPropagation(); toggleInputSelect(origIndex); }} checked={inputSelections.includes(origIndex)} /></span>
-              <span class="item-number">{origIndex + 1}.</span>
-              <span class="item-text">{item}</span>
-              <span class="edit-link" onclick={(e) => { e.stopPropagation(); startEditing(origIndex, item); }}>Edit</span>
-            </div>
-          {/if}
-        {:else}
-          <div class="empty-state">No inputs added yet</div>
-        {/each}
+            <div class="empty-state">No inputs added yet</div>
+          {/each}
+        </div>
       </div>
       <div class="add-input-container">
         <input id="inputField" type="text" class="add-input" placeholder="Type and press Enter..."
@@ -1289,25 +1356,22 @@
       {#if outputs.length > 5}
         <input type="text" class="filter-input" placeholder="Filter..." bind:value={outputFilter} />
       {/if}
-      <div class="output-list">
-        {#each filteredOutputIndices as { value: item, index: origIndex } (origIndex)}
-          <div class="list-item" class:latest-output-item={origIndex === outputs.length - 1} class:dragging={dragIndex === origIndex} class:drop-target={dropIndex === origIndex}
-            class:selected={outputSelections.includes(item)} data-value={item} draggable="true"
-            ondragstart={(e) => handleDragStart(e, origIndex, 'output')}
-            ondragover={(e) => handleDragOver(e, origIndex)}
-            ondragleave={handleDragLeave}
-            ondrop={(e) => handleDrop(e, origIndex, 'output')}
-            ondragend={handleDragEnd}
-            onclick={(e) => handleItemSelect(e, 'output')} tabindex="0"
-onkeydown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); focusedOutputIndex = Math.min(origIndex + 1, outputs.length - 1); document.querySelectorAll('.output-list .list-item')[focusedOutputIndex]?.focus(); } else if (e.key === 'ArrowUp') { e.preventDefault(); focusedOutputIndex = Math.max(origIndex - 1, 0); document.querySelectorAll('.output-list .list-item')[focusedOutputIndex]?.focus(); } else if (e.key === 'Enter' || e.key === ' ') { toggleOutputSelect(item); e.preventDefault(); } }}
-            style="border-left: 3px solid var(--accent);">
-            <span class="checkmark-wrap"><input type="checkbox" class="checkmark" onclick={(e) => { e.stopPropagation(); toggleOutputSelect(item); }} checked={outputSelections.includes(item)} /></span>
-            <span class="item-number">{origIndex + 1}.</span>
-            <span class="item-text">{item}</span>
-          </div>
-        {:else}
-          <div class="empty-state">No outputs yet</div>
-        {/each}
+      <div class="list-wrapper">
+        <div class="output-list">
+          {#each filteredOutputIndices as { value: item, index: origIndex } (origIndex)}
+            <div class="list-item" class:latest-output-item={origIndex === outputs.length - 1}
+              class:selected={outputSelections.includes(item)} data-index={origIndex} data-value={item}
+              onclick={(e) => handleItemSelect(e, 'output')} tabindex="0"
+              onkeydown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); focusedOutputIndex = Math.min(origIndex + 1, outputs.length - 1); document.querySelectorAll('.output-list .list-item')[focusedOutputIndex]?.focus(); } else if (e.key === 'ArrowUp') { e.preventDefault(); focusedOutputIndex = Math.max(origIndex - 1, 0); document.querySelectorAll('.output-list .list-item')[focusedOutputIndex]?.focus(); } else if (e.key === 'Enter' || e.key === ' ') { toggleOutputSelect(item); e.preventDefault(); } }}
+              style="border-left: 3px solid var(--accent);">
+              <span class="checkmark-wrap"><input type="checkbox" class="checkmark" onclick={(e) => { e.stopPropagation(); toggleOutputSelect(item); }} checked={outputSelections.includes(item)} /></span>
+              <span class="item-number">{origIndex + 1}.</span>
+              <span class="item-text">{item}</span>
+            </div>
+          {:else}
+            <div class="empty-state">No outputs yet</div>
+          {/each}
+        </div>
       </div>
       <canvas class="output-particle-canvas" bind:this={outputCanvasRef}></canvas>
     </div>
@@ -1353,16 +1417,6 @@ onkeydown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); focusedOutp
     color: var(--text-secondary);
     text-align: center;
     padding: 20px;
-  }
-
-  html, body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background-color: var(--bg-primary);
-    color: var(--text-primary);
-    overflow: hidden;
-    height: 100%;
-    margin: 0;
-    padding: 0;
   }
 
   :global(.app-layout) {
@@ -1673,7 +1727,6 @@ onkeydown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); focusedOutp
     gap: 6px;
   }
 
-  .color-wheel-btn svg { width: 16px; height: 16px; color: var(--accent) !important; }
   .color-wheel-btn:hover { border-color: var(--accent); color: var(--text-primary); }
 
   .cp-wrap { padding-top: 6px; }
@@ -1696,7 +1749,6 @@ onkeydown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); focusedOutp
   /* Volume */
   .volume-row { display: flex; align-items: center; gap: 8px; }
   .vol-icon { font-size: 14px; display: flex; align-items: center; color: var(--accent); }
-  .vol-icon svg { width: 16px; height: 16px; }
   .volume-slider { flex: 1; accent-color: var(--accent); cursor: pointer; }
   .vol-label { font-size: 11px; color: var(--text-secondary); min-width: 32px; text-align: right; font-family: monospace; }
 
@@ -1707,7 +1759,6 @@ onkeydown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); focusedOutp
   /* Dock buttons */
   .dock-row { display: flex; flex-direction: column; gap: 5px; }
   .dock-btn { width: 100%; padding: 6px 10px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 7px; color: var(--text-secondary); font-size: 11px; cursor: pointer; text-align: left; transition: all 0.15s ease; display: flex; align-items: center; gap: 6px; }
-  .dock-btn svg { width: 14px; height: 14px; color: var(--accent) !important; }
   .dock-btn.active { border-color: var(--accent); color: var(--text-primary); }
   .dock-btn:hover { border-color: var(--accent); color: var(--text-primary); }
 
@@ -1727,10 +1778,24 @@ onkeydown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); focusedOutp
   :global(.list-item.new) { animation: slideIn 0.25s ease forwards; }
 
   @keyframes subtlePulse {
-    0%, 100% { box-shadow: 0 0 0 transparent; }
-    50% { box-shadow: 0 0 10px var(--accent-glow), 0 0 20px var(--accent-bg-hover); }
+    0%, 100% { filter: drop-shadow(0 0 0 transparent); }
+    50% { filter: drop-shadow(0 0 8px var(--accent-glow)) drop-shadow(0 0 16px var(--accent-bg-hover)); }
   }
-  :global(.latest-output-item) { animation: subtlePulse 2s ease infinite; }
+  .list-item.dragging {
+    opacity: 0.35;
+    background: var(--accent-bg-hover);
+  }
+
+  .list-wrapper.is-dragging {
+    cursor: grabbing;
+    user-select: none;
+  }
+
+  .list-wrapper.is-dragging .list-item {
+    cursor: grabbing;
+  }
+
+  :global(.latest-output-item) { animation: subtlePulse 2s ease; will-change: filter; }
 
   @keyframes pulseGlow {
     0%, 100% { box-shadow: 0 0 20px var(--accent-glow); }
@@ -1738,13 +1803,13 @@ onkeydown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); focusedOutp
   }
   :global(.latest-output-field.pulse) { animation: pulseGlow 0.6s ease; }
 
-  @keyframes gradientShift { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+  @keyframes gradientDrift { 0% { transform: translate(0, 0); } 50% { transform: translate(-5%, -5%); } 100% { transform: translate(0, 0); } }
 
   body::before {
     content: ''; position: fixed; top: -50%; left: -50%; width: 200%; height: 200%;
     background: radial-gradient(circle at 30% 40%, var(--accent-bg-hover) 0%, transparent 50%),
                 radial-gradient(circle at 70% 60%, rgba(139, 92, 246, 0.02) 0%, transparent 50%);
-    animation: gradientShift 20s ease infinite; pointer-events: none; z-index: -1;
+    animation: gradientDrift 20s ease infinite; will-change: transform; pointer-events: none; z-index: -1;
   }
 
   :global(.particle-canvas), :global(.output-particle-canvas) {

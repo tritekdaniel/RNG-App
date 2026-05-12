@@ -4,23 +4,40 @@ export class ParticleSystem {
     this.ctx = canvas.getContext('2d');
     this.particles = [];
     this.animating = false;
-    this.resize();
-    window.addEventListener('resize', () => this.resize());
+
+    // Store bound reference so we can remove it later
+    this._resizeHandler = () => this.resize();
+    window.addEventListener('resize', this._resizeHandler);
+
+    // Size the canvas without starting the animation loop
+    this._syncSize();
   }
 
-  resize() {
+  // Just syncs canvas dimensions — does NOT start animation
+  _syncSize() {
+    if (!this.canvas.parentElement) return;
     const rect = this.canvas.parentElement.getBoundingClientRect();
-    this.canvas.width = rect.width;
-    this.canvas.height = rect.height;
-    if (!this.animating) {
-      this.animating = true;
-      this.animate();
+    if (rect.width > 0 && rect.height > 0) {
+      this.canvas.width = rect.width;
+      this.canvas.height = rect.height;
     }
+  }
+
+  // Called on window resize — only syncs size, does not touch animation state
+  resize() {
+    this._syncSize();
+  }
+
+  // Call this to clean up when the ParticleSystem is no longer needed
+  destroy() {
+    window.removeEventListener('resize', this._resizeHandler);
+    this.particles = [];
+    this.animating = false;
+    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
   }
 
   burst(count, color) {
     for (let i = 0; i < count / 2; i++) {
-      // Left side particles moving right
       this.particles.push({
         x: -Math.random() * 10,
         y: Math.random() * this.canvas.height,
@@ -32,7 +49,6 @@ export class ParticleSystem {
       });
     }
     for (let i = 0; i < count / 2; i++) {
-      // Right side particles moving left
       this.particles.push({
         x: this.canvas.width + Math.random() * 10,
         y: Math.random() * this.canvas.height,
@@ -75,7 +91,7 @@ export class ParticleSystem {
 
   animate() {
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    
+
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
       p.x += p.vx;
@@ -92,14 +108,14 @@ export class ParticleSystem {
       this.ctx.fillRect(p.x, p.y, p.size, p.size);
     }
 
+    // Always reset globalAlpha so the canvas context is left clean
+    this.ctx.globalAlpha = 1;
+
     if (this.particles.length > 0) {
       requestAnimationFrame(() => this.animate());
     } else {
       this.animating = false;
-      // Final clear after all particles gone
-      setTimeout(() => {
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-      }, 100);
+      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     }
   }
 
