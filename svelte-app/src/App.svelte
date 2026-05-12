@@ -1593,16 +1593,16 @@ import addSound from './assets/Add.m4a?url';
 
   :global(.checkmark:checked) { background-color: var(--accent); border-color: var(--accent); }
 
-  :global(.checkmark-wrap) {
+:global(.checkmark-wrap) {
     display: inline-flex;
     align-items: center;
     height: 16px;
-    margin-right: 7px;
+    margin-right: -6px;
   }
 
   :global(.item-number) {
     color: var(--text-secondary);
-    min-width: 22px;
+    min-width: 30px;
     text-align: right;
     margin-right: 7px;
     font-size: 12px;
