@@ -24,15 +24,15 @@ A desktop application for generating random values from a user-defined list of i
 
 ## Screenshots
 
-![Main Interface](examples/notifications.png)
+![Main Interface](examples/notifications-v2.png)
 
-![Docked Panel Mode](examples/undocked.png)
+![Docked Panel Mode](examples/undocked-v2.png)
 
-![Filter and Drag-Drop](examples/dragndrop.png)
+![Filter and Drag-Drop](examples/dragndrop-v2.png)
 
-![Settings](examples/settingsarevariedyes.png)
+![Settings](examples/settingsarevariedyes-v2.png)
 
-![Dark Theme](examples/coolappyes.png)
+![Dark Theme](examples/coolappyes-v2.png)
 
 ## Tech Stack
 
