@@ -421,10 +421,14 @@ import addSound from './assets/Add.m4a?url';
       outputs = state.outputs || [];
       outputMode = state.output_mode || 'single';
 
-      if (outputs.length > prevOutputsLen && particlesEnabled && particleSystem && canvasRef) {
+      if (outputs.length > prevOutputsLen) {
         await tick();
         const lastOutputEl = document.querySelector('.latest-output-item');
         if (lastOutputEl) {
+          lastOutputEl.classList.add('new');
+          setTimeout(() => lastOutputEl.classList.remove('new'), 300);
+        }
+        if (particlesEnabled && particleSystem && canvasRef && lastOutputEl) {
           const elRect = lastOutputEl.getBoundingClientRect();
           for (let i = 0; i < 6; i++) {
             particleSystem.particles.push({
@@ -434,8 +438,6 @@ import addSound from './assets/Add.m4a?url';
             });
           }
           particleSystem.startAnimation();
-          lastOutputEl.classList.add('new');
-          setTimeout(() => lastOutputEl.classList.remove('new'), 300);
         }
       }
       prevOutputsLen = outputs.length;
