@@ -21,7 +21,6 @@
   },
   "bundle": {
     "active": true,
-    "version": "1.4.0",
     "targets": ["deb", "rpm", "appimage", "nsis", "dmg", "app"],
     "icon": [
       "icons/icon.png",
