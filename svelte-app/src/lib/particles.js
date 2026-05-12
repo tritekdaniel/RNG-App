@@ -4,9 +4,13 @@ export class ParticleSystem {
     this.ctx = canvas.getContext('2d');
     this.particles = [];
     this.animating = false;
+    this._resizeTimeout = null;
 
     // Store bound reference so we can remove it later
-    this._resizeHandler = () => this.resize();
+    this._resizeHandler = () => {
+      if (this._resizeTimeout) clearTimeout(this._resizeTimeout);
+      this._resizeTimeout = setTimeout(() => this.resize(), 100);
+    };
     window.addEventListener('resize', this._resizeHandler);
 
     // Size the canvas without starting the animation loop
@@ -30,6 +34,7 @@ export class ParticleSystem {
 
   // Call this to clean up when the ParticleSystem is no longer needed
   destroy() {
+    if (this._resizeTimeout) clearTimeout(this._resizeTimeout);
     window.removeEventListener('resize', this._resizeHandler);
     this.particles = [];
     this.animating = false;
@@ -89,6 +94,21 @@ export class ParticleSystem {
     }
   }
 
+  gentleRise(count, color) {
+    for (let i = 0; i < count; i++) {
+      this.particles.push({
+        x: Math.random() * this.canvas.width,
+        y: this.canvas.height + Math.random() * 20,
+        vx: (Math.random() - 0.5) * 1.5,
+        vy: -(1.5 + Math.random() * 3),
+        size: 3 + Math.random() * 6,
+        alpha: 0.7,
+        color,
+        wobble: Math.random() * Math.PI * 2,
+      });
+    }
+  }
+
   animate() {
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
@@ -96,7 +116,11 @@ export class ParticleSystem {
       const p = this.particles[i];
       p.x += p.vx;
       p.y += p.vy;
-      p.alpha -= 0.011;
+      if (p.wobble !== undefined) {
+        p.wobble += 0.05;
+        p.x += Math.sin(p.wobble) * 0.3;
+      }
+      p.alpha -= 0.008;
 
       if (p.alpha <= 0) {
         this.particles.splice(i, 1);

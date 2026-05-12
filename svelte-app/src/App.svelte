@@ -20,6 +20,7 @@
   import volumeMuteIcon from './assets/Volume-mute.svg?raw';
   import volumeLowIcon from './assets/Volume-low.svg?raw';
   import volumeHighIcon from './assets/Volume-high.svg?raw';
+  import dragIndicatorIcon from './assets/DragIndicator.svg?raw';
 
 import addSound from './assets/Add.m4a?url';
   import removeSound from './assets/Remove.m4a?url';
@@ -605,6 +606,7 @@ import addSound from './assets/Add.m4a?url';
     document.addEventListener('keydown', deleteHandler);
   });
 
+  let lastOutputDimensions = $state({ width: 0, height: 0 });
   $effect(() => {
     const ref = outputCanvasRef;
     const _docked = outputDocked;
@@ -613,42 +615,16 @@ import addSound from './assets/Add.m4a?url';
       if (!ref.parentElement) return;
       const rect = ref.parentElement.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
-        ref.width = rect.width;
-        ref.height = rect.height;
-        if (outputParticleSystem) outputParticleSystem.destroy();
-        outputParticleSystem = new ParticleSystem(ref);
+        if (rect.width !== lastOutputDimensions.width || rect.height !== lastOutputDimensions.height) {
+          lastOutputDimensions = { width: rect.width, height: rect.height };
+          ref.width = rect.width;
+          ref.height = rect.height;
+          if (outputParticleSystem) outputParticleSystem.destroy();
+          outputParticleSystem = new ParticleSystem(ref);
+        }
       }
     }, 50);
     return () => clearTimeout(t);
-  });
-
-  $effect(() => {
-    const _len = outputs.length;
-    const _enabled = particlesEnabled;
-    if (!_enabled || outputs.length === 0 || !particleSystem) return;
-    const el = document.querySelector('.latest-output-item');
-    if (!el || !canvasRef) return;
-    const canvasRect = canvasRef.getBoundingClientRect();
-    const rect = el.getBoundingClientRect();
-    const sparkleInterval = setInterval(() => {
-      if (!particlesEnabled || outputs.length === 0 || !particleSystem) return;
-      const currentEl = document.querySelector('.latest-output-item');
-      if (!currentEl) return;
-      const currentRect = currentEl.getBoundingClientRect();
-      const prevCount = particleSystem.particles.length;
-      for (let i = 0; i < 2; i++) {
-        particleSystem.particles.push({
-          x: currentRect.left - canvasRect.left + Math.random() * currentRect.width,
-          y: currentRect.bottom - canvasRect.top,
-          vx: (Math.random() - 0.5) * 0.3, vy: -(0.4 + Math.random() * 0.6),
-          size: 1.5 + Math.random() * 2, alpha: 0.5, color: tempColor,
-        });
-      }
-      if (particleSystem.particles.length > prevCount) {
-        particleSystem.startAnimation();
-      }
-    }, 300);
-    return () => clearInterval(sparkleInterval);
   });
 
   let prevParticlesEnabled = particlesEnabled;
@@ -766,7 +742,7 @@ import addSound from './assets/Add.m4a?url';
           }
         }
         if (outputParticleSystem) {
-          outputParticleSystem.risingUpward(150, tempColor);
+          outputParticleSystem.gentleRise(150, tempColor);
           outputParticleSystem.startAnimation();
         }
       }
@@ -925,7 +901,7 @@ import addSound from './assets/Add.m4a?url';
         }
       }
       if (outputParticleSystem) {
-        outputParticleSystem.risingUpward(150, tempColor);
+        outputParticleSystem.gentleRise(150, tempColor);
         outputParticleSystem.startAnimation();
       }
     }
@@ -1120,7 +1096,7 @@ import addSound from './assets/Add.m4a?url';
               data-index={origIndex}
               onclick={(e) => handleItemSelect(e, 'input')} tabindex="0"
               onkeydown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); focusedInputIndex = Math.min(origIndex + 1, inputs.length - 1); document.querySelectorAll('.input-list .list-item')[focusedInputIndex]?.focus(); } else if (e.key === 'ArrowUp') { e.preventDefault(); focusedInputIndex = Math.max(origIndex - 1, 0); document.querySelectorAll('.input-list .list-item')[focusedInputIndex]?.focus(); } else if ((e.key === 'Enter' || e.key === ' ') && !e.target.classList.contains('checkmark')) { toggleInputSelect(origIndex); e.preventDefault(); } }}>
-              <span class="drag-handle" title="Drag to reorder">⋮⋮</span>
+              <span class="drag-handle" title="Drag to reorder">{@html dragIndicatorIcon}</span>
               <span class="checkmark-wrap"><input type="checkbox" class="checkmark" onclick={(e) => { e.stopPropagation(); toggleInputSelect(origIndex); }} checked={inputSelections.includes(origIndex)} /></span>
               <span class="item-number">{origIndex + 1}.</span>
               <span class="item-text">{item}</span>
@@ -1214,7 +1190,7 @@ import addSound from './assets/Add.m4a?url';
                 data-index={origIndex}
                 onclick={(e) => handleItemSelect(e, 'input')} tabindex="0"
                 onkeydown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); focusedInputIndex = Math.min(origIndex + 1, inputs.length - 1); document.querySelectorAll('.input-list .list-item')[focusedInputIndex]?.focus(); } else if (e.key === 'ArrowUp') { e.preventDefault(); focusedInputIndex = Math.max(origIndex - 1, 0); document.querySelectorAll('.input-list .list-item')[focusedInputIndex]?.focus(); } else if ((e.key === 'Enter' || e.key === ' ') && !e.target.classList.contains('checkmark')) { toggleInputSelect(origIndex); e.preventDefault(); } }}>
-                <span class="drag-handle" title="Drag to reorder">⋮⋮</span>
+                <span class="drag-handle" title="Drag to reorder">{@html dragIndicatorIcon}</span>
                 <span class="checkmark-wrap"><input type="checkbox" class="checkmark" onclick={(e) => { e.stopPropagation(); toggleInputSelect(origIndex); }} checked={inputSelections.includes(origIndex)} /></span>
                 <span class="item-number">{origIndex + 1}.</span>
                 <span class="item-text">{item}</span>
@@ -1521,6 +1497,10 @@ import addSound from './assets/Add.m4a?url';
     0%, 100% { transform: scale(1); }
     50% { transform: scale(0.75); }
   }
+  @keyframes expand-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.25); }
+  }
   @keyframes jerk-down {
     0%, 100% { transform: translateY(0); }
     25% { transform: translateY(2px); }
@@ -1530,6 +1510,12 @@ import addSound from './assets/Add.m4a?url';
   @keyframes shrink-subtle {
     0%, 100% { transform: scale(1); }
     50% { transform: scale(0.889); }
+  }
+  @keyframes double-shrink {
+    0%, 100% { transform: scale(1); }
+    25% { transform: scale(0.85); }
+    50% { transform: scale(1); }
+    75% { transform: scale(0.85); }
   }
   @keyframes tilt-right {
     0%, 100% { transform: rotate(0deg); }
@@ -1545,8 +1531,8 @@ import addSound from './assets/Add.m4a?url';
   :global(.icon-undock:hover svg) { animation: bounce-up 0.5s ease-in-out; }
   :global(.icon-clear:hover svg) { animation: jiggle 0.3s ease-in-out; }
   :global(.icon-save:hover svg) { animation: shrink-pulse 0.4s ease-in-out; }
-  :global(.icon-load:hover svg) { animation: jerk-down 0.3s ease-in-out; }
-  :global(.icon-dock:hover svg) { animation: shrink-subtle 0.3s ease-in-out; }
+  :global(.icon-load:hover svg) { animation: expand-pulse 0.4s ease-in-out; }
+  :global(.icon-dock:hover svg) { animation: double-shrink 0.4s ease-in-out; }
   :global(.icon-add:hover svg) { animation: tilt-right 0.4s ease-in-out; }
   :global(.icon-remove:hover svg) { animation: jiggle 0.3s ease-in-out; }
   :global(.icon-unselect:hover svg) { animation: jiggle 0.3s ease-in-out; }
