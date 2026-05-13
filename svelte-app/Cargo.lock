@@ -2925,7 +2925,7 @@ dependencies = [
 
 [[package]]
 name = "rng-app"
-version = "1.4.3"
+version = "1.4.4"
 dependencies = [
  "lazy_static",
  "rand 0.8.6",

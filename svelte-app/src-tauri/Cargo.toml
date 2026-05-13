@@ -1,6 +1,6 @@
 [package]
 name = "rng-app"
-version = "1.4.3"
+version = "1.4.4"
 description = "Random value generator"
 authors = ["Randumb"]
 license = ""

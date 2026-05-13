@@ -245,8 +245,19 @@ import addSound from './assets/Add.m4a?url';
   let focusedOutputIndex = $state(-1);
   let inputDocked = $state(localStorage.getItem('rng-input-docked') !== 'false');
   let outputDocked = $state(localStorage.getItem('rng-output-docked') !== 'false');
-  let filteredInputIndices = $derived(inputFilter ? inputs.map((v, i) => ({ value: v, index: i })).filter(item => item.value.toLowerCase().includes(inputFilter.toLowerCase())) : inputs.map((v, i) => ({ value: v, index: i })));
-  let filteredOutputIndices = $derived(outputFilter ? outputs.map((v, i) => ({ value: v, index: i })).filter(item => item.value.toLowerCase().includes(outputFilter.toLowerCase())) : outputs.map((v, i) => ({ value: v, index: i })));
+  let filteredInputIndices = $derived(inputFilter
+    ? inputs.reduce((acc, v, i) => {
+        if (v.toLowerCase().includes(inputFilter.toLowerCase())) acc.push({ value: v, index: i });
+        return acc;
+      }, [])
+    : inputs.map((v, i) => ({ value: v, index: i })));
+  let filteredOutputIndices = $derived(outputFilter
+    ? outputs.reduce((acc, v, i) => {
+        if (v.toLowerCase().includes(outputFilter.toLowerCase())) acc.push({ value: v, index: i });
+        return acc;
+      }, [])
+    : outputs.map((v, i) => ({ value: v, index: i })));
+  
 
   function setAccentColor(color) {
     const r = parseInt(color.slice(1,3), 16);
@@ -358,7 +369,7 @@ import addSound from './assets/Add.m4a?url';
     if (soundUrl) playAudio(soundUrl);
   }
 
-  function drawSV() {
+  function drawSV(color) {
     if (!svCanvasRef || !svWrapRef) return;
     const w = svWrapRef.offsetWidth;
     if (w === 0) return;
@@ -379,7 +390,7 @@ import addSound from './assets/Add.m4a?url';
     ctx.beginPath(); ctx.arc(thumbX, thumbY, 6, 0, Math.PI * 2);
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
     ctx.beginPath(); ctx.arc(thumbX, thumbY, 4, 0, Math.PI * 2);
-    ctx.fillStyle = hsvToRgbStr(hueVal, satVal, valVal); ctx.fill();
+    ctx.fillStyle = color || hsvToRgbStr(hueVal, satVal, valVal); ctx.fill();
   }
 
   function startSVDrag(e) {
@@ -404,7 +415,7 @@ import addSound from './assets/Add.m4a?url';
     satVal = Math.min(100, Math.max(0, ((clientX - rect.left) / rect.width) * 100));
     valVal = Math.min(100, Math.max(0, 100 - ((clientY - rect.top) / rect.height) * 100));
     tempColor = hsvToRgbStr(hueVal, satVal, valVal);
-    updateAccentColor(tempColor); drawSV();
+    updateAccentColor(tempColor); drawSV(tempColor);
   }
 
   function hueFromEvent(e) {
@@ -413,7 +424,7 @@ import addSound from './assets/Add.m4a?url';
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     hueVal = Math.min(360, Math.max(0, ((clientX - rect.left) / rect.width) * 360));
     tempColor = hsvToRgbStr(hueVal, satVal, valVal);
-    updateAccentColor(tempColor); drawSV();
+    updateAccentColor(tempColor); drawSV(tempColor);
   }
 
   async function rpc(cmd, args) { return invoke(cmd, args ?? {}); }
@@ -733,17 +744,17 @@ import addSound from './assets/Add.m4a?url';
       } else {
         playSound(singleOutputSound);
       }
-      if (particlesEnabled && outputCanvasRef) {
-        if (!outputParticleSystem || !outputCanvasRef.parentElement) {
+      if (particlesEnabled && outputCanvasRef) {  // Visual feedback via particle effects
+        if (!outputParticleSystem || !outputCanvasRef.parentElement) {  // Initialize or resize particle system
           const rect = outputCanvasRef.parentElement?.getBoundingClientRect();
           if (rect?.width > 0) {
-            outputCanvasRef.width = rect.width;
+            outputCanvasRef.width = rect.width;  // Match container width
             outputCanvasRef.height = rect.height;
             outputParticleSystem = new ParticleSystem(outputCanvasRef);
           }
         }
         if (outputParticleSystem) {
-          outputParticleSystem.gentleRise(150, tempColor);
+          outputParticleSystem.gentleRise(150, tempColor);  // Gentle particle animation on color match
           outputParticleSystem.startAnimation();
         }
       }
