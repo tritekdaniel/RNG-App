@@ -2,7 +2,7 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { ParticleSystem } from './lib/particles.js';
   import { invoke } from '@tauri-apps/api/core';
-  import { register, unregister, isRegistered } from '@tauri-apps/plugin-global-shortcut';
+  import { register, unregister } from '@tauri-apps/plugin-global-shortcut';
   import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { emit } from '@tauri-apps/api/event';
   import { listen } from '@tauri-apps/api/event';
@@ -146,20 +146,21 @@ import addSound from './assets/Add.m4a?url';
           node.classList.add('is-dragging');
           playSound(dragPickUpSound);
 
-          // Create ghost
-          ghost = item.cloneNode(true);
-          ghost.style.cssText = `
-            position: fixed;
-            pointer-events: none;
-            z-index: 9999;
-            width: ${item.offsetWidth}px;
-            opacity: 0.85;
-            border-radius: 8px;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-            transform: rotate(1.5deg) scale(1.02);
-            transition: none;
-            left: ${item.getBoundingClientRect().left}px;
-            top: ${item.getBoundingClientRect().top}px;
+// Create ghost
+           ghost = item.cloneNode(true);
+           const itemRect = item.getBoundingClientRect();
+           ghost.style.cssText = `
+             position: fixed;
+             pointer-events: none;
+             z-index: 9999;
+             width: ${item.offsetWidth}px;
+             opacity: 0.85;
+             border-radius: 8px;
+             box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+             transform: rotate(1.5deg) scale(1.02);
+             transition: none;
+             left: ${itemRect.left}px;
+             top: ${itemRect.top}px;
           `;
           document.body.appendChild(ghost);
         }
@@ -308,6 +309,9 @@ import addSound from './assets/Add.m4a?url';
 
   let canvasRef = null;
   let outputCanvasRef = null;
+  let latestFieldRef = null;
+  let centerPanelRef = null;
+  let hueTrackRef = null;
   let particleSystem = $state(null);
   let outputParticleSystem = $state(null);
   let prevOutputsLen = 0;
@@ -315,7 +319,6 @@ import addSound from './assets/Add.m4a?url';
   let shortcutHandler = null;
   let deleteHandler = null;
   let visibilityChangeHandler = null;
-  let lastGenerateTime = 0;
   let generating = false;
   let svDragging = false;
   let hueDragging = false;
@@ -405,8 +408,8 @@ import addSound from './assets/Add.m4a?url';
   }
 
   function hueFromEvent(e) {
-    if (!svWrapRef) return;
-    const rect = svWrapRef.getBoundingClientRect();
+    if (!hueTrackRef) return;
+    const rect = hueTrackRef.getBoundingClientRect();
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     hueVal = Math.min(360, Math.max(0, ((clientX - rect.left) / rect.width) * 360));
     tempColor = hsvToRgbStr(hueVal, satVal, valVal);
@@ -533,9 +536,9 @@ import addSound from './assets/Add.m4a?url';
     // Listen for accent color changes from other windows
     unlistenAccent = await listen('accent-updated', (event) => {
       const color = event.payload.color;
+      if (color === tempColor) return; // Guard against self-echo loop
       tempColor = color;
       setAccentColor(color);
-      updateAccentColors(color);
     });
 
     // Listen for theme changes from other windows
@@ -730,8 +733,6 @@ import addSound from './assets/Add.m4a?url';
       } else {
         playSound(singleOutputSound);
       }
-      updateAccentColors(tempColor);
-      setAccentColor(tempColor);
       if (particlesEnabled && outputCanvasRef) {
         if (!outputParticleSystem || !outputCanvasRef.parentElement) {
           const rect = outputCanvasRef.parentElement?.getBoundingClientRect();
@@ -746,11 +747,10 @@ import addSound from './assets/Add.m4a?url';
           outputParticleSystem.startAnimation();
         }
       }
-      const latestField = document.querySelector('.latest-output-field');
+      const latestField = latestFieldRef;
       if (latestField) { latestField.classList.add('pulse'); setTimeout(() => latestField.classList.remove('pulse'), 600); }
       emit('state-updated');
-      const centerPanel = document.querySelector('.center-panel');
-      if (centerPanel) { centerPanel.classList.remove('animate-border'); void centerPanel.offsetWidth; centerPanel.classList.add('animate-border'); }
+      if (centerPanelRef) { centerPanelRef.classList.remove('animate-border'); void centerPanelRef.offsetWidth; centerPanelRef.classList.add('animate-border'); }
     } finally {
       generating = false;
     }
@@ -814,9 +814,10 @@ import addSound from './assets/Add.m4a?url';
       lastInputSelectionIndex = index;
     } else {
       const value = e.currentTarget.dataset.value;
+      const valueIndex = outputs.indexOf(value);
       if (e.shiftKey && lastOutputSelectionIndex >= 0) {
-        const start = Math.min(lastOutputSelectionIndex, outputs.indexOf(value));
-        const end = Math.max(lastOutputSelectionIndex, outputs.indexOf(value));
+        const start = Math.min(lastOutputSelectionIndex, valueIndex);
+        const end = Math.max(lastOutputSelectionIndex, valueIndex);
         let added = false;
         for (let i = start; i <= end; i++) {
           const v = outputs[i];
@@ -826,7 +827,7 @@ import addSound from './assets/Add.m4a?url';
       } else {
         toggleOutputSelect(value);
       }
-      lastOutputSelectionIndex = outputs.indexOf(value);
+      lastOutputSelectionIndex = valueIndex;
     }
   }
 
@@ -837,20 +838,10 @@ import addSound from './assets/Add.m4a?url';
     playSound(clearSound);
   }
 
-  function updateAccentColors(color) {
-    const r = parseInt(color.slice(1,3), 16);
-    const g = parseInt(color.slice(3,5), 16);
-    const b = parseInt(color.slice(5,7), 16);
-    document.documentElement.style.setProperty('--accent-glow', `rgba(${r}, ${g}, ${b}, 0.3)`);
-    document.documentElement.style.setProperty('--accent-bg-hover', `rgba(${r}, ${g}, ${b}, 0.1)`);
-    document.documentElement.style.setProperty('--accent-glow-medium', `rgba(${r}, ${g}, ${b}, 0.15)`);
-  }
-
   function updateAccentColor(color) {
     tempColor = color;
     localStorage.setItem('rng-accent-color', color);
     setAccentColor(color);
-    updateAccentColors(color);
     emit('accent-updated', { color });
   }
 
@@ -889,8 +880,6 @@ import addSound from './assets/Add.m4a?url';
     } else {
       playSound(batchOutputSound);
     }
-    updateAccentColors(tempColor);
-    setAccentColor(tempColor);
     if (particlesEnabled && outputCanvasRef) {
       if (!outputParticleSystem || !outputCanvasRef.parentElement) {
         const rect = outputCanvasRef.parentElement?.getBoundingClientRect();
@@ -907,8 +896,7 @@ import addSound from './assets/Add.m4a?url';
     }
     await refreshState();
     emit('state-updated');
-    const centerPanel = document.querySelector('.center-panel');
-    if (centerPanel) { centerPanel.classList.remove('animate-border'); void centerPanel.offsetWidth; centerPanel.classList.add('animate-border'); }
+    if (centerPanelRef) { centerPanelRef.classList.remove('animate-border'); void centerPanelRef.offsetWidth; centerPanelRef.classList.add('animate-border'); }
   }
 
   // --- Shortcut recording ---
@@ -1014,28 +1002,7 @@ import addSound from './assets/Add.m4a?url';
     localStorage.setItem('rng-output-docked', String(outputDocked));
   }
 
-  function startPanelDrag(e, panel) {
-    if (e.target.closest('button, input, .list-item')) return;
-    e.preventDefault();
-    const startX = e.clientX, startY = e.clientY;
-    const startPos = panel === 'input' ? { ...inputPos } : { ...outputPos };
-    const onMove = (ev) => {
-      const dx = ev.clientX - startX, dy = ev.clientY - startY;
-      if (panel === 'input') {
-        inputPos = { x: (startPos.x || 0) + dx, y: (startPos.y || 60) + dy };
-        localStorage.setItem('rng-input-pos', JSON.stringify(inputPos));
-      } else {
-        outputPos = { x: (startPos.x ?? window.innerWidth - 310) + dx, y: (startPos.y || 60) + dy };
-        localStorage.setItem('rng-output-pos', JSON.stringify(outputPos));
-      }
-    };
-    const onUp = () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
-    window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp);
-  }
-
-  let inputFloatStyle = $derived(`left: ${inputPos.x || 20}px; top: ${inputPos.y || 60}px;`);
-  // FIX: outputPos.x is always a number now (set at init), so no runtime fallback needed
-  let outputFloatStyle = $derived(`left: ${outputPos.x}px; top: ${outputPos.y || 60}px;`);
+  
 </script>
 
 <!-- Shortcut recording overlay -->
@@ -1212,7 +1179,7 @@ import addSound from './assets/Add.m4a?url';
   {/if}
 
   <!-- Center Panel -->
-  <div class="center-panel" onclick={(e) => { if (!e.target.closest('.settings-btn') && !e.target.closest('.settings-panel')) { if (showSettingsMenu) playSound(settingsCloseSound); showSettingsMenu = false; } }}>
+  <div class="center-panel" bind:this={centerPanelRef} onclick={(e) => { if (!e.target.closest('.settings-btn') && !e.target.closest('.settings-panel')) { if (showSettingsMenu) playSound(settingsCloseSound); showSettingsMenu = false; } }}>
     <button class="settings-btn icon-settings" onclick={(e) => { e.stopPropagation(); if (showSettingsMenu) { showSettingsMenu = false; playSound(settingsCloseSound); } else { showSettingsMenu = true; playSound(settingsOpenSound); } }} title="Settings">{@html settingsIcon}</button>
 
     {#if showSettingsMenu}
@@ -1242,8 +1209,7 @@ import addSound from './assets/Add.m4a?url';
               <canvas class="cp-canvas" bind:this={svCanvasRef} height="150"></canvas>
             </div>
             <div class="cp-hue-wrap">
-              <div class="cp-hue-track" onpointerdown={(e) => startHueDrag(e)}>
-                <div class="cp-hue-thumb" style="left: calc({(hueVal / 360) * 100}% - 4px);"></div>
+               <div class="cp-hue-track" bind:this={hueTrackRef} onpointerdown={(e) => startHueDrag(e)}>                <div class="cp-hue-thumb" style="left: calc({(hueVal / 360) * 100}% - 4px);"></div>
               </div>
             </div>
             <div class="cp-output">
@@ -1300,7 +1266,7 @@ import addSound from './assets/Add.m4a?url';
       </div>
     {/if}
 
-    <div class="latest-output-field" class:has-value={latestOutput !== null}>
+    <div class="latest-output-field" bind:this={latestFieldRef} class:has-value={latestOutput !== null}>
       {latestOutput ?? 'Generate something...'}
     </div>
 

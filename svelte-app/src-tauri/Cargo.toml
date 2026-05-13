@@ -1,8 +1,8 @@
 [package]
 name = "rng-app"
-version = "1.0.0"
+version = "1.4.2"
 description = "Random value generator"
-authors = [""]
+authors = ["Randumb"]
 license = ""
 rust-version = "1.70"
 edition = "2021"

@@ -559,3 +559,7 @@ body::before {
   pointer-events: none;
   z-index: -1;
 }
+
+body.pause-animations::before {
+  animation-play-state: paused;
+}

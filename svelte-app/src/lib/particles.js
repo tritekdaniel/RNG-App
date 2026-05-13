@@ -149,4 +149,8 @@ export class ParticleSystem {
       this.animate();
     }
   }
+
+  stopAnimation() {
+    this.animating = false;
+  }
 }
